@@ -1,0 +1,38 @@
+# src/pyproject.tomal
+
+[build-system]
+requires = ["hatchling>=1.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cloud-foundry"
+version = "0.0.1"
+authors = [
+    { name="Daniel Repik", email="danrepik@icloud.com" },
+]
+description = "cloud-foundry is a curated set of cloud components that can be used to assemble cloud based applications."
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3.9",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pulumi",
+    "pulumi-aws",
+]
+
+[project.urls]
+"Documentation" = "https://github.com/DanRepik/cloud-foundry"
+"Source" = "https://github.com/DanRepik/cloud-foundry"
+
+[tool.hatch.build.targets.sdist]
+include = ["cloud-foundry"]
+
+[tool.hatch.build.targets.wheel]
+include = ["cloud-foundry"]
+
+[tool.pytest.ini_options]
+markers = [
+    "unit: marks tests as unit tests that do not require a database",
+    "integration: marks tests that operate on a real database",
+]

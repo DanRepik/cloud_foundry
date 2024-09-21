@@ -1,0 +1,11 @@
+name: infra
+runtime:
+  name: python
+  options:
+    toolchain: pip
+    virtualenv: venv
+description: Test deployment
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: aws-python
