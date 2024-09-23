@@ -5,6 +5,8 @@ import cloud_foundry
 cloud_foundry.python_function(
   "test-function",
   handler="app.lambda_handler",
+  memory_size=256,
+  timeout=3,
   sources={
     "app.py": """
 import json

@@ -18,16 +18,20 @@ class PythonFunction(pulumi.ComponentResource):
         *,
         hash: str,
         archive_location: str,
-        handler: str,
+        handler: str = None,
+        timeout: int = None,
+        memory_size: int = None,
         environment: dict[str, str]=None,
         actions: list[str]=None,
         opts=None
     ):
-        super().__init__("custom:cloud_forge:PythonFunction", name, {}, opts)
+        super().__init__("cloud_forge:lambda:PythonFunction", name, {}, opts)
         self.name = name
         self.handler = handler
         self.environment = environment or {}
-        self.actions = actions or []
+        self.memory_size = memory_size
+        self.timeout = timeout
+        self.actions = actions
         self.create_lambda_function(hash, archive_location)
         self.register_outputs({})
 
@@ -51,6 +55,7 @@ class PythonFunction(pulumi.ComponentResource):
         role = aws.iam.Role(
             f"{self.name}-lambda-execution",
             assume_role_policy=assume_role_policy.json,
+            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-lambda-execution",
             opts=pulumi.ResourceOptions(parent=self)
         )
 
@@ -58,7 +63,7 @@ class PythonFunction(pulumi.ComponentResource):
             statements=[
                 aws.iam.GetPolicyDocumentStatementArgs(
                     effect="Allow",
-                    actions=(self.actions + [
+                    actions=((self.actions or []) + [
                         "logs:CreateLogGroup",
                         "logs:CreateLogStream",
                         "logs:PutLogEvents",
@@ -70,40 +75,33 @@ class PythonFunction(pulumi.ComponentResource):
 
         return role
 
-    def create_log_group(self) -> aws.cloudwatch.LogGroup:
-        log_group = aws.cloudwatch.LogGroup(
-            f"{self.name}-log-group",
-            name=f"/aws/lambda/{pulumi.get_project()}-{self.name}",
-            retention_in_days=3,
-            opts=pulumi.ResourceOptions(parent=self)
-        )
-        return log_group
-
     def invoke_arn(self) -> pulumi.Output[str]:
         return self.lambda_.invoke_arn
 
     def create_lambda_function(self, hash: str, archive_location: str):
         log.debug("creating lambda function")
 
-        log_group = self.create_log_group()
-
         execution_role = self.create_execution_role()
 
         self.lambda_ = aws.lambda_.Function(
             f"{self.name}-lambda",
             code=pulumi.FileArchive(archive_location),
-            name=f"{pulumi.get_project()}-{self.name}",
+            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}",
             role=execution_role.arn,
-            handler=self.handler,
+            memory_size=self.memory_size,
+            timeout=self.timeout,
+            handler=self.handler or "app.handler",
             source_code_hash=hash,
             runtime=aws.lambda_.Runtime.PYTHON3D9,
             environment=aws.lambda_.FunctionEnvironmentArgs(variables=self.environment),
-            opts=pulumi.ResourceOptions(depends_on=[execution_role, log_group], parent=self),
+            opts=pulumi.ResourceOptions(depends_on=[execution_role], parent=self),
         )
 
 def python_function(
     name: str, *,
-    handler: str,
+    handler: str = None,
+    memory_size: int = None,
+    timeout: int = None,
     sources: dict[str, str] = None,
     requirements: list[str] = None,
     environment: dict[str, str] = None,
@@ -117,6 +115,8 @@ def python_function(
     return PythonFunction(
         name=name,
         hash=archive_builder.hash(),
+        memory_size=memory_size,
+        timeout=timeout,
         handler=handler,
         archive_location=archive_builder.location(),
         environment=environment,

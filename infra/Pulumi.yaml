@@ -1,4 +1,4 @@
-name: infra
+name: foundry-test
 runtime:
   name: python
   options:

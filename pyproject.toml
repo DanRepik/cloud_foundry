@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cloud-foundry"
-version = "0.0.1"
+version = "0.0.4"
 authors = [
     { name="Daniel Repik", email="danrepik@icloud.com" },
 ]
@@ -26,10 +26,10 @@ dependencies = [
 "Source" = "https://github.com/DanRepik/cloud-foundry"
 
 [tool.hatch.build.targets.sdist]
-include = ["cloud-foundry"]
+include = ["cloud_foundry"]
 
 [tool.hatch.build.targets.wheel]
-include = ["cloud-foundry"]
+include = ["cloud_foundry"]
 
 [tool.pytest.ini_options]
 markers = [
