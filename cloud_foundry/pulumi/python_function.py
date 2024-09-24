@@ -32,8 +32,14 @@ class PythonFunction(pulumi.ComponentResource):
         self.memory_size = memory_size
         self.timeout = timeout
         self.actions = actions
-        self.create_lambda_function(hash, archive_location)
-        self.register_outputs({})
+        self.function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
+        self.lambda_ = self.create_lambda_function(hash, archive_location)
+        pulumi.export(f"{name}-invoke-arn", self.lambda_.invoke_arn)
+        pulumi.export(f"{name}-name", self.function_name)
+        self.register_outputs({
+            "invoke_arn": self.lambda_.invoke_arn,
+            "name": self.function_name
+        })
 
     def create_execution_role(self) -> aws.iam.Role:
         log.debug("creating execution role")
@@ -78,15 +84,15 @@ class PythonFunction(pulumi.ComponentResource):
     def invoke_arn(self) -> pulumi.Output[str]:
         return self.lambda_.invoke_arn
 
-    def create_lambda_function(self, hash: str, archive_location: str):
+    def create_lambda_function(self, hash: str, archive_location: str) -> aws.lambda_.Function:
         log.debug("creating lambda function")
 
         execution_role = self.create_execution_role()
 
-        self.lambda_ = aws.lambda_.Function(
+        return aws.lambda_.Function(
             f"{self.name}-lambda",
             code=pulumi.FileArchive(archive_location),
-            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}",
+            name=self.function_name,
             role=execution_role.arn,
             memory_size=self.memory_size,
             timeout=self.timeout,
