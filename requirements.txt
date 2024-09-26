@@ -4,3 +4,6 @@ pytest
 pulumi
 pulumi-aws
 pulumi-automation
+
+pytest
+requests

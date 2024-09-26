@@ -2,13 +2,51 @@
 
 import cloud_foundry
 
-cloud_foundry.python_function(
-  "test-function",
-  handler="app.lambda_handler",
-  memory_size=256,
-  timeout=3,
-  sources={
-    "app.py": """
+API_SPEC = """
+openapi: 3.0.3
+info:
+  title: Greeting API
+  description: A simple API that returns a greeting message.
+  version: 1.0.0
+paths:
+  /greet:
+    get:
+      summary: Returns a greeting message.
+      description: This endpoint returns a greeting message. It accepts an optional query parameter `name`. If `name` is not provided, it defaults to "World".
+      parameters:
+        - in: query
+          name: name
+          schema:
+            type: string
+          required: false
+          description: The name of the person to greet.
+          example: John
+      responses:
+        '200':
+          description: A greeting message.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    description: The greeting message.
+                    example: Hello, John!
+        '400':
+          description: Bad Request - Invalid query parameter
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: A description of the error.
+                    example: Invalid query parameter
+"""
+
+FUNCTION_CODE = """
 import json
 
 def lambda_handler(event, context):
@@ -23,71 +61,20 @@ def lambda_handler(event, context):
         }
     }
 """
-  }
+
+
+test_function = cloud_foundry.python_function(
+    "test-function",
+    handler="app.lambda_handler",
+    memory_size=256,
+    timeout=3,
+    sources={"app.py": FUNCTION_CODE},
 )
 
 rest_api = cloud_foundry.rest_api(
-  "rest-api",
-  body="""
-openapi: 3.0.3
-info:
-  title: Auth0 Mock Token Service
-  description: A mock service for generating and validating Auth0 tokens.
-  version: 1.0.0
-paths:
-  /token:
-    post:
-      summary: Generate a mock Auth0 JWT token
-      description: This endpoint generates a mock JWT token using the provided client credentials.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                client_id:
-                  type: string
-                  description: The client ID associated with the application.
-                  example: client_1
-                client_secret:
-                  type: string
-                  description: The client secret associated with the application.
-                  example: your-client-secret
-                audience:
-                  type: string
-                  description: The API audience.
-                  example: https://api.example.com/
-                grant_type:
-                  type: string
-                  description: The OAuth grant type (must be 'client_credentials').
-                  example: client_credentials
-              required:
-                - client_id
-                - client_secret
-                - audience
-                - grant_type
-      responses:
-        '200':
-          description: Successfully generated JWT token
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  access_token:
-                    type: string
-                    description: The generated JWT access token.
-                    example: eyJhbGciOiJ...abc123
-                  token_type:
-                    type: string
-                    description: The type of token (usually Bearer).
-                    example: Bearer
-                  expires_in:
-                    type: integer
-                    description: Expiration time of the token in seconds.
-                    example: 86400
-...
-"""
+    "test-api",
+    body=API_SPEC,
+    integrations=[
+        { "path":"/greet", "method":"get", "function":test_function}
+    ],
 )
-

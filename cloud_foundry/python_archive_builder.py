@@ -2,6 +2,9 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
+
+
 
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.hash_comparator import HashComparator
@@ -62,11 +65,25 @@ class PythonArchiveBuilder(ArchiveBuilder):
     def build_archive(self):
         log.info(f"building archive: {self.name}")
         try:
-            shutil.make_archive(
-                base_name=self._location.replace('.zip', ''),
-                format='zip',
-                root_dir=self._base_dir
-            )
+            # Create the archive file
+            archive_name = self._location.replace('.zip', '')
+            with zipfile.ZipFile(f"{archive_name}.zip", 'w', zipfile.ZIP_DEFLATED) as archive:
+                # Include only 'stage' and 'lib' folders
+                for folder in ['staging', 'libs']:
+                    folder_path = os.path.join(self._base_dir, folder)
+                    log.info(f"folder_path: {folder_path}")
+                    if os.path.exists(folder_path):
+                        for root, _, files in os.walk(folder_path):
+                            for file in files:
+                                # Compute the full path of the file
+                                log.info(f"root: {root}")
+                                full_path = os.path.join(root, file)
+                                # Compute the relative path to store in the archive
+                                relative_path = os.path.relpath(full_path, root)
+                                # Add the file to the archive
+                                log.info(f"archive write: {full_path}, relative_path: {relative_path}")
+                                archive.write(full_path, relative_path)
+
             log.info("Archive built successfully")
         except Exception as e:
             log.error(f"Error building archive: {e}")

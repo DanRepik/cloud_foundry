@@ -1,88 +1,25 @@
-# test_fixtures.py
+import pytest
+import logging
 
-import pulumi_aws as aws
-import pulumi.automation as auto
-import os
-import shutil
-from typing import Callable, Dict, Optional, Tuple
+log = logging.Logger(__name__)
 
-# Type alias for the pulumi program function
-PulumiProgram = Callable[[], None]
+api_id: str = None
+@pytest.fixture
+def gateway_endpoint():
+    global api_id
+    if not api_id:
+        from pulumi import automation as auto
 
-def pulumi_stack_up(stack_name: str, project_name: str, pulumi_program: PulumiProgram) -> Tuple[auto.Stack, Dict[str, auto.OutputValue]]:
-    """
-    Sets up and runs a Pulumi stack using the specified program.
-
-    Args:
-        stack_name (str): The name of the stack.
-        project_name (str): The name of the project.
-        pulumi_program (PulumiProgram): The inline function defining the Pulumi program.
-
-    Returns:
-        Tuple[auto.Stack, Dict[str, auto.OutputValue]]: The deployed Pulumi stack and its outputs.
-    """
-    
-    # Define the local backend for the stack state
-    local_backend_path = os.path.join(os.getcwd(), "temp", "pulumi-local-backend")
-
-    # Set the Pulumi backend using an environment variable
-    os.environ["PULUMI_BACKEND_URL"] = f"file://{local_backend_path}"
-
-    # Ensure the backend directory exists
-    if not os.path.exists(local_backend_path):
-        os.makedirs(local_backend_path)
-
-    # Set the stack to use the local filesystem backend
-    workspace_opts = auto.LocalWorkspaceOptions(
-        work_dir=os.getcwd(),  # Current working directory
-        project_settings=auto.ProjectSettings(
-            name=project_name,
-            runtime="python",
-        ),
-    )
-
-    # Create or select a Pulumi stack with the local backend
-    stack = auto.create_or_select_stack(
-        stack_name=stack_name,
-        project_name=project_name,
-        program=pulumi_program,
-        opts=workspace_opts
-    )
-
-    # Set configuration options for the stack
-    stack.set_config("aws:region", auto.ConfigValue(value="us-west-2"))
-
-    # Deploy the stack and get the outputs
-    up_res = stack.up()
-
-    # Return the stack and its outputs
-    return stack, up_res.outputs
-
-def pulumi_stack_down(stack):
-    # Teardown (destroy the stack after the test)
-    stack.destroy()
-
-    # Optionally remove the local backend directory if you want to clean up the state
-    local_backend_path = os.path.join(os.getcwd(), "temp", "pulumi-local-backend")
-    if os.path.exists(local_backend_path):
-        shutil.rmtree(local_backend_path)
-
-_localstack_provider: Optional[aws.Provider] = None
-
-def localstack_provider() -> aws.Provider:
-    global _localstack_provider
-    if not _localstack_provider:
-        _localstack_provider = aws.Provider(
-            "localstack",
-            skip_credentials_validation=True,  # Ensure AWS credential validation is skipped
-            skip_metadata_api_check=True,      # Ensure AWS metadata API validation is skipped
-            s3_use_path_style=True,
-            region="us-east-2",
-            endpoints=[
-                aws.ProviderEndpointArgs(
-                    s3="http://localhost.localstack.cloud:4566"
-                )
-            ]
+        stack = auto.select_stack(
+            stack_name="local",
+            work_dir="infra",
         )
-    print(f"localstack_provider: {_localstack_provider}")
-    return _localstack_provider
+
+        stack.refresh(on_output=print)
+        outputs = stack.outputs()
+        log.info(f"outputs: {outputs}")
+
+        api_id = outputs["rest-api-id"].value if "rest-api-id" in outputs else None
+    return (
+        f"http://{api_id}.execute-api.localhost.localstack.cloud:4566/rest-api"
+    )
