@@ -84,6 +84,7 @@ class Function(pulumi.ComponentResource):
             ]
         )
 
+        log.info(f"assume_role_policy: {assume_role_policy}")
         role = aws.iam.Role(
             f"{self.name}-lambda-execution",
             assume_role_policy=assume_role_policy.json,
@@ -91,7 +92,7 @@ class Function(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        aws.iam.get_policy_document(
+        policy_document = aws.iam.get_policy_document(
             statements=[
                 aws.iam.GetPolicyDocumentStatementArgs(
                     effect="Allow",
@@ -106,6 +107,14 @@ class Function(pulumi.ComponentResource):
                     resources=["*"],
                 )
             ]
+        )
+
+        log.info(f"policy_document: {policy_document.json}")
+        aws.iam.RolePolicy(
+            f"{self.name}-lambda-policy",
+            role=role.id,
+            policy=policy_document.json,
+            opts=pulumi.ResourceOptions(depends_on=[role], parent=self)
         )
 
         return role

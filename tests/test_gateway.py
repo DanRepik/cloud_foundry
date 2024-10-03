@@ -8,11 +8,12 @@ from test_fixtures import gateway_endpoint
 
 log = logging.Logger(__name__)
 
+gateway_endpoint = "http://ksqb5jj3qc.execute-api.localhost.localstack.cloud:4566/test-api"
 
-def test_get_request_all(gateway_endpoint):
+
+def test_get_request_all():
     # Define the endpoint
     endpoint = gateway_endpoint + "/greet?name=World"
-
     log.info(f"request: {endpoint}")
 
     # Send the GET request
@@ -26,11 +27,7 @@ def test_get_request_all(gateway_endpoint):
     ), f"Expected status code 200, got {response.status_code}"
 
     # Validate the response content
-    albums = response.json()
-    assert len(albums) == 347
-    assert albums[0] == {
-        "album_id": 1,
-        "artist_id": 1,
-        "title": "For Those About To Rock We Salute You",
-    }
+    result = response.json()
+    print(f"result: {result['message']}")
+    assert result['message'] == "Hello World!"
 

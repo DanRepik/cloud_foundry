@@ -3,53 +3,54 @@
 import cloud_foundry
 
 API_SPEC = """
-openapi: 3.0.3
 info:
-  title: Greeting API
   description: A simple API that returns a greeting message.
+  title: Greeting API
   version: 1.0.0
+openapi: 3.0.3
 paths:
   /greet:
     get:
       summary: Returns a greeting message.
-      description: This endpoint returns a greeting message. It accepts an optional query parameter `name`. If `name` is not provided, it defaults to "World".
+      description: This endpoint returns a greeting message. It accepts an optional
+          query parameter `name`. If `name` is not provided, it defaults to "World".
       parameters:
-        - in: query
+        - description: The name of the person to greet.
+          example: John
+          in: query
           name: name
+          required: false
           schema:
             type: string
-          required: false
-          description: The name of the person to greet.
-          example: John
       responses:
-        '200':
-          description: A greeting message.
+        200:
           content:
             application/json:
               schema:
-                type: object
                 properties:
-                  message:
-                    type: string
-                    description: The greeting message.
-                    example: Hello, John!
-        '400':
-          description: Bad Request - Invalid query parameter
+                    message:
+                      description: The greeting message.
+                      example: Hello, John!
+                      type: string
+                type: object
+          description: A greeting message.
+        400:
           content:
             application/json:
               schema:
-                type: object
                 properties:
                   error:
-                    type: string
                     description: A description of the error.
                     example: Invalid query parameter
+                    type: string
+                type: object
+          description: Bad Request - Invalid query parameter
 """
 
 FUNCTION_CODE = """
 import json
 
-def lambda_handler(event, context):
+def handler(event, context):
     name = event.get("queryStringParameters", {}).get("name", "World")
     return {
         "statusCode": 200,
@@ -65,7 +66,7 @@ def lambda_handler(event, context):
 
 test_function = cloud_foundry.python_function(
     "test-function",
-    handler="app.lambda_handler",
+    handler="app.handler",
     memory_size=256,
     timeout=3,
     sources={"app.py": FUNCTION_CODE},
