@@ -19,7 +19,8 @@ def gateway_endpoint():
         outputs = stack.outputs()
         log.info(f"outputs: {outputs}")
 
-        api_id = outputs["rest-api-id"].value if "rest-api-id" in outputs else None
+        api_id = outputs["test-api-id"].value if "test-api-id" in outputs else None
     return (
-        f"http://{api_id}.execute-api.localhost.localstack.cloud:4566/rest-api"
+        f"http://{api_id}.execute-api.localhost.localstack.cloud:4566/test-api"
+
     )
