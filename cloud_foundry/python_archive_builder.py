@@ -68,7 +68,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
             # Create the archive file
             archive_name = self._location.replace('.zip', '')
             with zipfile.ZipFile(f"{archive_name}.zip", 'w', zipfile.ZIP_DEFLATED) as archive:
-                # Include only 'stage' and 'lib' folders
+                # Include both 'staging' and 'libs' folders
                 for folder in ['staging', 'libs']:
                     folder_path = os.path.join(self._base_dir, folder)
                     log.info(f"folder_path: {folder_path}")
@@ -76,18 +76,19 @@ class PythonArchiveBuilder(ArchiveBuilder):
                         for root, _, files in os.walk(folder_path):
                             for file in files:
                                 # Compute the full path of the file
-                                log.info(f"root: {root}")
                                 full_path = os.path.join(root, file)
-                                # Compute the relative path to store in the archive
-                                relative_path = os.path.relpath(full_path, root)
-                                # Add the file to the archive
-                                log.info(f"archive write: {full_path}, relative_path: {relative_path}")
+                                # Compute the relative path to store in the archive, relative to 'staging' or 'libs'
+                                relative_path = os.path.relpath(full_path, folder_path)
+                                # Add the file to the archive, using the folder (staging/libs) as a prefix
+                                archive_path = os.path.join(folder, relative_path)
+                                log.info(f"archive write: {full_path}, archive_path: {relative_path}")
                                 archive.write(full_path, relative_path)
 
             log.info("Archive built successfully")
         except Exception as e:
             log.error(f"Error building archive: {e}")
             raise
+            
 
     def install_sources(self):
         log.info(f"installing resources: {self.name}")
@@ -141,7 +142,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
             return
 
         log.info(
-            f"Installing packages using: {sys.executable} -m pip3 "
+            f"Installing packages using: {sys.executable} -m pip "
             + f"install --target {self._libs} --platform manylinux2010_x86_64 "
             + "--implementation cp --only-binary=:all: --upgrade "
             + f"--python-version 3.9 -r {requirements_file}"

@@ -6,3 +6,5 @@ pulumi-local
 hatch
 pytest
 requests
+
+-e ..

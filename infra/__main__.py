@@ -70,6 +70,9 @@ test_function = cloud_foundry.python_function(
     memory_size=256,
     timeout=3,
     sources={"app.py": FUNCTION_CODE},
+    requirements=[
+        "requests==2.27.1",
+    ],
 )
 
 rest_api = cloud_foundry.rest_api(
