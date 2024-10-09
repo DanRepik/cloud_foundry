@@ -1,18 +1,20 @@
+# function.py
+
 import pulumi
 import pulumi_aws as aws
 from cloud_foundry.utils.logger import logger
 
 log = logger(__name__)
 
-
 class Function(pulumi.ComponentResource):
+    lambda_: aws.lambda_.Function
 
     def __init__(
         self,
         name,
         *,
-        hash: str,
-        archive_location: str,
+        archive_location: str = None,
+        hash: str = None,
         runtime: str = None,
         handler: str = None,
         timeout: int = None,
@@ -23,8 +25,8 @@ class Function(pulumi.ComponentResource):
     ):
         super().__init__("cloud_forge:lambda:Function", name, {}, opts)
         self.name = name
-        self.hash = hash
         self.archive_location = archive_location
+        self.hash = hash
         self.runtime = runtime
         self.handler = handler
         self.environment = environment or {}
@@ -32,16 +34,22 @@ class Function(pulumi.ComponentResource):
         self.timeout = timeout
         self.actions = actions
         self.function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
-        self.lambda_: pulumi.aws.Function = None
+
+        # Check if we should import an existing Lambda function
+        if not archive_location and not hash and not runtime and not handler:
+            log.info(f"Importing existing Lambda function: {self.function_name}")
+            self.lambda_ = aws.lambda_.Function.get(
+                f"{self.name}-lambda", self.name, opts=pulumi.ResourceOptions(parent=self)
+            )
+        else:
+            self._create_lambda_function()
 
     @property
     def invoke_arn(self) -> pulumi.Output[str]:
-        if not self.lambda_:
-            self._create_lambda_function()
         return self.lambda_.invoke_arn
 
     def _create_lambda_function(self) -> aws.lambda_.Function:
-        log.debug("creating lambda function")
+        log.debug("Creating lambda function")
 
         execution_role = self.create_execution_role()
 
@@ -68,7 +76,7 @@ class Function(pulumi.ComponentResource):
         )
 
     def create_execution_role(self) -> aws.iam.Role:
-        log.debug("creating execution role")
+        log.debug("Creating execution role")
         assume_role_policy = aws.iam.get_policy_document(
             statements=[
                 aws.iam.GetPolicyDocumentStatementArgs(
@@ -84,7 +92,7 @@ class Function(pulumi.ComponentResource):
             ]
         )
 
-        log.info(f"assume_role_policy: {assume_role_policy}")
+        log.info(f"Assume role policy: {assume_role_policy}")
         role = aws.iam.Role(
             f"{self.name}-lambda-execution",
             assume_role_policy=assume_role_policy.json,
@@ -109,7 +117,7 @@ class Function(pulumi.ComponentResource):
             ]
         )
 
-        log.info(f"policy_document: {policy_document.json}")
+        log.info(f"Policy document: {policy_document.json}")
         aws.iam.RolePolicy(
             f"{self.name}-lambda-policy",
             role=role.id,
@@ -118,3 +126,10 @@ class Function(pulumi.ComponentResource):
         )
 
         return role
+
+def import_function(
+    name
+):
+    return Function(
+        name
+    )
