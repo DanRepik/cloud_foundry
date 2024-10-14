@@ -5,9 +5,11 @@ import pulumi_aws as aws
 from typing import Optional, Union
 
 from cloud_foundry.utils.logger import logger
+from cloud_foundry.utils.localstack import is_localstack_deployment
 from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
 
 log = logger(__name__)
+
 
 class RestAPI(pulumi.ComponentResource):
     rest_api: Optional[aws.apigateway.RestApi] = None
@@ -45,14 +47,10 @@ class RestAPI(pulumi.ComponentResource):
         if not isinstance(authorizer_arns, list):
             authorizer_arns = [authorizer_arns]
 
-
         # Wait for all invoke_arns to resolve and then build the API
         def build_api(invoke_arns):
             self._build(invoke_arns)
-            log.info(f"returning from build_api {self.rest_api}")
-            result = self.rest_api.id
-            log.info(f"self.rest_api: {isinstance( result, pulumi.Output)}")
-            return result
+            return self.rest_api.id
 
         # Set up the output that will store the REST API ID
         all_arns = integration_arns + authorizer_arns
@@ -80,8 +78,7 @@ class RestAPI(pulumi.ComponentResource):
         )
 
         # Add permissions for API Gateway to invoke the Lambda functions
-        function_names = self._get_function_names_from_spec()
-        for function_name in function_names:
+        for function_name in self.editor.get_function_names():
             aws.lambda_.Permission(
                 f"{function_name}-api-gateway-permission",
                 action="lambda:InvokeFunction",
@@ -128,6 +125,7 @@ class RestAPI(pulumi.ComponentResource):
                     function_names.append(function_name)
         return function_names
 
+
 def rest_api(
     name: str,
     body: str,
@@ -141,5 +139,12 @@ def rest_api(
     log.info("built rest_api")
     # Export the REST API ID using the output registered in the component
     pulumi.export(f"{name}-id", rest_api_instance.rest_api_id)
+    host = (
+        "execute-api.localhost.localstack.cloud:4566"
+        if is_localstack_deployment()
+        else "execute-api.us-east-1.amazonaws.com"
+    )
+    pulumi.export(f"{name}-host", f"{host}/{name}")
+
     log.info("return rest_api")
     return rest_api_instance

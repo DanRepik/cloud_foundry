@@ -32,6 +32,8 @@ include = ["cloud_foundry"]
 include = ["cloud_foundry"]
 
 [tool.pytest.ini_options]
+pythonpath = [".."]
+testpaths = ["infra"]
 markers = [
     "unit: marks tests as unit tests that do not require a database",
     "integration: marks tests that operate on a real database",

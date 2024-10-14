@@ -3,7 +3,7 @@
 import yaml
 import json
 import os
-from typing import Union, Dict, Any, List, Mapping
+from typing import Union, Dict, Any, List, Mapping, Optional
 
 class OpenAPISpecEditor:
     def __init__(self, spec: Union[str, List[str]]):
@@ -89,6 +89,12 @@ class OpenAPISpecEditor:
             if part is None:
                 raise KeyError(f"Part '{'.'.join(keys)}' does not exist in the spec.")
         return part
+
+    def get_spec_part(self, keys: List[str], create: bool = False) -> Optional[Any]:
+        try:
+            return self.get_or_create_spec_part(keys, False)
+        except KeyError:
+            return None
 
     def get_operation(self, path: str, method: str) -> Dict:
         """Retrieve a specific operation (method and path) from the OpenAPI spec."""

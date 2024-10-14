@@ -71,7 +71,6 @@ class PythonArchiveBuilder(ArchiveBuilder):
                 # Include both 'staging' and 'libs' folders
                 for folder in ['staging', 'libs']:
                     folder_path = os.path.join(self._base_dir, folder)
-                    log.info(f"folder_path: {folder_path}")
                     if os.path.exists(folder_path):
                         for root, _, files in os.walk(folder_path):
                             for file in files:
@@ -81,7 +80,6 @@ class PythonArchiveBuilder(ArchiveBuilder):
                                 relative_path = os.path.relpath(full_path, folder_path)
                                 # Add the file to the archive, using the folder (staging/libs) as a prefix
                                 archive_path = os.path.join(folder, relative_path)
-                                log.info(f"archive write: {full_path}, archive_path: {relative_path}")
                                 archive.write(full_path, relative_path)
 
             log.info("Archive built successfully")

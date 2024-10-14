@@ -2,6 +2,9 @@
 import json
 import os
 import pulumi
+from cloud_foundry import logger
+
+log = logger(__name__)
 
 def is_localstack_deployment() -> bool:
     """
@@ -18,15 +21,13 @@ def is_localstack_deployment() -> bool:
             return True
 
     # Check Pulumi stack configuration for custom AWS service endpoints
-    config = pulumi.Config('aws')
-    
+    config = pulumi.Config("aws")
     endpoints_str = config.get('endpoints')
     if not endpoints_str:
         return False
 
     # Parse the endpoints as a list of dictionaries
     endpoints = json.loads(endpoints_str)
-
     # Iterate through the list of dictionaries
     for endpoint in endpoints:
         for service, url in endpoint.items():

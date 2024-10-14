@@ -1,8 +1,5 @@
 # aws_openapi_editor.py
 
-import yaml
-import json
-import os
 from typing import Union, Dict
 
 from cloud_foundry.utils.logger import logger
@@ -22,7 +19,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         """
         super().__init__(spec)
 
-    def add_token_authorizer(self, name: str, authentication_invoke_arn: str):
+    def add_token_authorizer(self, name: str, function_name: str, authentication_invoke_arn: str):
         # Use get_or_create_spec_part to ensure 'components' and 'securitySchemes' exist
         security_schemes = self.get_or_create_spec_part(
             ["components", "securitySchemes"], create=True
@@ -32,6 +29,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             "type": "apiKey",
             "name": "Authorization",
             "in": "header",
+            "x-function-name": function_name,
             "x-amazon-apigateway-authtype":"custom",
             "x-amazon-apigateway-authorizer": {
                 "type": "token",
@@ -48,7 +46,8 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         for authorizer, invoke_arn in zip(authorizers, invoke_arns):
             log.info(f"add authorizers path: {authorizer['name']}")
             if authorizer["type"] == "token":
-                self.add_token_authorizer(authorizer["name"], invoke_arn)
+                function_name = authorizer["function"].name
+                self.add_token_authorizer(authorizer["name"], function_name, invoke_arn)
 
     def _add_integration(
         self, path: str, method: str, function_name: str, invoke_arn: str
@@ -81,3 +80,33 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                 integration["function"].function_name,
                 invoke_arn,
             )
+
+    def get_function_names(self) -> list[str]:
+        """
+        Return a list of all 'x-function-name' attributes in the OpenAPI spec.
+
+        Returns:
+            List[str]: A list of function names found in the OpenAPI spec.
+        """
+        function_names = []
+        paths = self.get_spec_part(["paths"])
+        log.info(f"path: {paths}")
+
+        if paths:
+            for _, methods in paths.items():
+                for _, operation in methods.items():
+                    function_name = operation.get("x-function-name")
+                    if function_name:
+                        function_names.append(function_name)
+
+        security_schemes = self.get_spec_part(["components", "securitySchemes"])
+        log.info(f"security: {security_schemes}")
+        if security_schemes:
+            for _, scheme in security_schemes.items():
+                function_name = scheme.get("x-function-name")
+                if function_name:
+                    function_names.append(function_name)
+
+        log.info(f"function_names: {function_names}")
+
+        return function_names

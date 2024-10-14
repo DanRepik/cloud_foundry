@@ -7,3 +7,5 @@ pulumi-automation
 
 pytest
 requests
+
+-e .
