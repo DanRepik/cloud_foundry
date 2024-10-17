@@ -4,6 +4,9 @@ import yaml
 import json
 import os
 from typing import Union, Dict, Any, List, Mapping, Optional
+from cloud_foundry.utils.logger import logger
+
+log = logger(__name__)
 
 class OpenAPISpecEditor:
     def __init__(self, spec: Union[str, List[str]]):
@@ -25,8 +28,10 @@ class OpenAPISpecEditor:
             raise ValueError(
                 "The spec must be a string, a list of strings, or file paths."
             )
+        log.info(f"merged spec: {self.to_yaml()}")
 
     def _merge_spec(self, spec: str):
+        log.info(f"merge spec: {spec}")
         """Merge a single OpenAPI spec into the current one."""
         # Check if the string is a file path to a YAML file
         if os.path.isfile(spec) and (spec.endswith(".yaml") or spec.endswith(".yml")):
@@ -64,8 +69,17 @@ class OpenAPISpecEditor:
             Dict[Any, Any]: The merged dictionary.
         """
         for key, value in source.items():
-            if isinstance(value, Mapping) and key in destination:
+            if isinstance(value, Mapping) and isinstance(destination.get(key), Mapping):
                 destination[key] = self._deep_merge(value, destination.get(key, {}))
+            elif isinstance(value, list):
+                # Handle lists by replacing the value if the list in source is empty, otherwise merge lists
+                if not value:
+                    destination[key] = value  # Override with empty list
+                elif key in destination and isinstance(destination[key], list):
+                    # Merge non-empty lists if both are lists
+                    destination[key].extend(value)
+                else:
+                    destination[key] = value
             else:
                 destination[key] = value
         return destination

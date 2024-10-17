@@ -1,7 +1,6 @@
 # aws_openapi_editor.py
 
-from typing import Union, Dict
-
+from typing import Union, Dict, List
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.openapi_editor import OpenAPISpecEditor
 
@@ -30,7 +29,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             "name": "Authorization",
             "in": "header",
             "x-function-name": function_name,
-            "x-amazon-apigateway-authtype":"custom",
+            "x-amazon-apigateway-authtype": "custom",
             "x-amazon-apigateway-authorizer": {
                 "type": "token",
                 "authorizerUri": authentication_invoke_arn,
@@ -40,18 +39,31 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             },
         }
 
-    def process_authorizers(self, authorizers: list[dict], invoke_arns: list[str]):
-        # Add each integration to the OpenAPI spec using the resolved invoke_arns
+    def process_authorizers(self, authorizers: list[dict], invoke_arns: list[str], function_names: list[str]):
+        """
+        Process and add each authorizer to the OpenAPI spec using the resolved invoke_arns and function names.
+
+        Args:
+            authorizers (list[dict]): List of authorizers defined in the configuration.
+            invoke_arns (list[str]): Resolved ARNs of the authorizer functions.
+            function_names (list[str]): Resolved function names of the authorizer functions.
+        """
         log.info(f"process authorizers: {invoke_arns}")
-        for authorizer, invoke_arn in zip(authorizers, invoke_arns):
-            log.info(f"add authorizers path: {authorizer['name']}")
+        for authorizer, invoke_arn, function_name in zip(authorizers, invoke_arns, function_names):
+            log.info(f"add authorizer: {authorizer['name']}")
             if authorizer["type"] == "token":
-                function_name = authorizer["function"].name
                 self.add_token_authorizer(authorizer["name"], function_name, invoke_arn)
 
-    def _add_integration(
-        self, path: str, method: str, function_name: str, invoke_arn: str
-    ):
+    def _add_integration(self, path: str, method: str, function_name: str, invoke_arn: str):
+        """
+        Add an integration to a specific path and method in the OpenAPI spec.
+
+        Args:
+            path (str): The API path (e.g., "/token").
+            method (str): The HTTP method (e.g., "post").
+            function_name (str): The name of the Lambda function.
+            invoke_arn (str): The ARN of the Lambda function to integrate with.
+        """
         self.add_operation_attribute(
             path=path,
             method=method,
@@ -69,15 +81,22 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             },
         )
 
-    def process_integrations(self, integrations: list[dict], invoke_arns: list[str]):
-        # Add each integration to the OpenAPI spec using the resolved invoke_arns
-        log.info(f"process integrations {invoke_arns}")
-        for integration, invoke_arn in zip(integrations, invoke_arns):
+    def process_integrations(self, integrations: list[dict], invoke_arns: list[str], function_names: list[str]):
+        """
+        Process and add each integration to the OpenAPI spec using the resolved invoke_arns and function names.
+
+        Args:
+            integrations (list[dict]): List of integrations defined in the configuration.
+            invoke_arns (list[str]): Resolved ARNs of the integration functions.
+            function_names (list[str]): Resolved function names of the integration functions.
+        """
+        log.info(f"process integrations: {invoke_arns}")
+        for integration, invoke_arn, function_name in zip(integrations, invoke_arns, function_names):
             log.info(f"add integration path: {integration['path']}")
             self._add_integration(
                 integration["path"],
                 integration["method"],
-                integration["function"].function_name,
+                function_name,
                 invoke_arn,
             )
 

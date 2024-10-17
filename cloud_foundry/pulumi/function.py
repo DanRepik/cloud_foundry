@@ -33,11 +33,11 @@ class Function(pulumi.ComponentResource):
         self.memory_size = memory_size
         self.timeout = timeout
         self.actions = actions
-        self.function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
+        self._function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
 
         # Check if we should import an existing Lambda function
         if not archive_location and not hash and not runtime and not handler:
-            log.info(f"Importing existing Lambda function: {self.function_name}")
+            log.info(f"Importing existing Lambda function: {self._function_name}")
             self.lambda_ = aws.lambda_.Function.get(
                 f"{self.name}-lambda", self.name, opts=pulumi.ResourceOptions(parent=self)
             )
@@ -47,6 +47,10 @@ class Function(pulumi.ComponentResource):
     @property
     def invoke_arn(self) -> pulumi.Output[str]:
         return self.lambda_.invoke_arn
+    
+    @property
+    def function_name(self) -> pulumi.Output[str]:
+        return self.lambda_.name
 
     def _create_lambda_function(self) -> aws.lambda_.Function:
         log.debug("Creating lambda function")
@@ -54,9 +58,9 @@ class Function(pulumi.ComponentResource):
         execution_role = self.create_execution_role()
 
         self.lambda_ = aws.lambda_.Function(
-            f"{self.name}-lambda",
+            f"{self.name}-function",
             code=pulumi.FileArchive(self.archive_location),
-            name=self.function_name,
+            name=self._function_name,
             role=execution_role.arn,
             memory_size=self.memory_size,
             timeout=self.timeout,
@@ -67,11 +71,11 @@ class Function(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(depends_on=[execution_role], parent=self),
         )
         pulumi.export(f"{self.name}-invoke-arn", self.lambda_.invoke_arn)
-        pulumi.export(f"{self.name}-name", self.function_name)
+        pulumi.export(f"{self.name}-name", self._function_name)
         self.register_outputs(
             {
                 "invoke-arn": self.lambda_.invoke_arn,
-                "function_name": self.function_name,
+                "function_name": self._function_name,
             }
         )
 
@@ -94,7 +98,7 @@ class Function(pulumi.ComponentResource):
 
         log.info(f"Assume role policy: {assume_role_policy}")
         role = aws.iam.Role(
-            f"{self.name}-lambda-execution",
+            f"{self.name}-role",
             assume_role_policy=assume_role_policy.json,
             name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-lambda-execution",
             opts=pulumi.ResourceOptions(parent=self),
@@ -119,7 +123,7 @@ class Function(pulumi.ComponentResource):
 
         log.info(f"Policy document: {policy_document.json}")
         aws.iam.RolePolicy(
-            f"{self.name}-lambda-policy",
+            f"{self.name}-role-policy",
             role=role.id,
             policy=policy_document.json,
             opts=pulumi.ResourceOptions(depends_on=[role], parent=self)
