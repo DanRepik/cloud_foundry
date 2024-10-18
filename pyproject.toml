@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cloud-foundry"
-version = "0.0.10"
+version = "0.0.12"
 authors = [
     { name="Daniel Repik", email="danrepik@icloud.com" },
 ]

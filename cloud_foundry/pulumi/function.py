@@ -21,6 +21,7 @@ class Function(pulumi.ComponentResource):
         memory_size: int = None,
         environment: dict[str, str] = None,
         actions: list[str] = None,
+        vpc_config: dict = None,  # New argument for VPC configuration
         opts=None,
     ):
         super().__init__("cloud_forge:lambda:Function", name, {}, opts)
@@ -33,6 +34,7 @@ class Function(pulumi.ComponentResource):
         self.memory_size = memory_size
         self.timeout = timeout
         self.actions = actions
+        self.vpc_config = vpc_config or {}  # Store VPC configuration
         self._function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
 
         # Check if we should import an existing Lambda function
@@ -57,6 +59,14 @@ class Function(pulumi.ComponentResource):
 
         execution_role = self.create_execution_role()
 
+        # Define VPC configuration if provided
+        vpc_config_args = None
+        if self.vpc_config:
+            vpc_config_args = aws.lambda_.FunctionVpcConfigArgs(
+                subnet_ids=self.vpc_config.get('subnet_ids', []),
+                security_group_ids=self.vpc_config.get('security_group_ids', []),
+            )
+
         self.lambda_ = aws.lambda_.Function(
             f"{self.name}-function",
             code=pulumi.FileArchive(self.archive_location),
@@ -68,6 +78,7 @@ class Function(pulumi.ComponentResource):
             source_code_hash=self.hash,
             runtime=self.runtime or aws.lambda_.Runtime.PYTHON3D9,
             environment=aws.lambda_.FunctionEnvironmentArgs(variables=self.environment),
+            vpc_config=vpc_config_args,  # Pass VPC config to Lambda
             opts=pulumi.ResourceOptions(depends_on=[execution_role], parent=self),
         )
         pulumi.export(f"{self.name}-invoke-arn", self.lambda_.invoke_arn)
@@ -131,9 +142,35 @@ class Function(pulumi.ComponentResource):
 
         return role
 
-def import_function(
-    name
-):
+
+def import_function(name: str) -> Function:
+    return Function(name)
+
+
+def function(
+    name,
+    *,
+    archive_location: str = None,
+    hash: str = None,
+    runtime: str = None,
+    handler: str = None,
+    timeout: int = None,
+    memory_size: int = None,
+    environment: dict[str, str] = None,
+    actions: list[str] = None,
+    vpc_config: dict = None,  # New argument for VPC configuration
+    opts=None,
+) -> Function:
     return Function(
-        name
+        name,
+        archive_location=archive_location,
+        hash=hash,
+        runtime=runtime, 
+        handler=handler, 
+        timeout=timeout, 
+        memory_size=memory_size,
+        environment=environment, 
+        actions=actions, 
+        vpc_config=vpc_config, 
+        opts=opts
     )
