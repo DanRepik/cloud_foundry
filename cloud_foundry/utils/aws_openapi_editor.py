@@ -1,5 +1,7 @@
 # aws_openapi_editor.py
 
+import re
+
 from typing import Union, Dict, List
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.openapi_editor import OpenAPISpecEditor
@@ -8,7 +10,7 @@ log = logger(__name__)
 
 
 class AWSOpenAPISpecEditor(OpenAPISpecEditor):
-    def __init__(self, spec: Union[Dict, str]):
+    def __init__(self, spec: Union[Dict, str, List[str]]):
         """
         Initialize the class by loading the OpenAPI specification.
 
@@ -18,7 +20,9 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         """
         super().__init__(spec)
 
-    def add_token_authorizer(self, name: str, function_name: str, authentication_invoke_arn: str):
+    def add_token_authorizer(
+        self, name: str, function_name: str, authentication_invoke_arn: str
+    ):
         # Use get_or_create_spec_part to ensure 'components' and 'securitySchemes' exist
         security_schemes = self.get_or_create_spec_part(
             ["components", "securitySchemes"], create=True
@@ -39,7 +43,9 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             },
         }
 
-    def process_authorizers(self, authorizers: list[dict], invoke_arns: list[str], function_names: list[str]):
+    def process_authorizers(
+        self, authorizers: list[dict], invoke_arns: list[str], function_names: list[str]
+    ):
         """
         Process and add each authorizer to the OpenAPI spec using the resolved invoke_arns and function names.
 
@@ -49,12 +55,16 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             function_names (list[str]): Resolved function names of the authorizer functions.
         """
         log.info(f"process authorizers: {invoke_arns}")
-        for authorizer, invoke_arn, function_name in zip(authorizers, invoke_arns, function_names):
+        for authorizer, invoke_arn, function_name in zip(
+            authorizers, invoke_arns, function_names
+        ):
             log.info(f"add authorizer: {authorizer['name']}")
             if authorizer["type"] == "token":
                 self.add_token_authorizer(authorizer["name"], function_name, invoke_arn)
 
-    def _add_integration(self, path: str, method: str, function_name: str, invoke_arn: str):
+    def _add_integration(
+        self, path: str, method: str, function_name: str, invoke_arn: str
+    ):
         """
         Add an integration to a specific path and method in the OpenAPI spec.
 
@@ -81,7 +91,12 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             },
         )
 
-    def process_integrations(self, integrations: list[dict], invoke_arns: list[str], function_names: list[str]):
+    def process_integrations(
+        self,
+        integrations: list[dict],
+        invoke_arns: list[str],
+        function_names: list[str],
+    ):
         """
         Process and add each integration to the OpenAPI spec using the resolved invoke_arns and function names.
 
@@ -91,7 +106,9 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             function_names (list[str]): Resolved function names of the integration functions.
         """
         log.info(f"process integrations: {invoke_arns}")
-        for integration, invoke_arn, function_name in zip(integrations, invoke_arns, function_names):
+        for integration, invoke_arn, function_name in zip(
+            integrations, invoke_arns, function_names
+        ):
             log.info(f"add integration path: {integration['path']}")
             self._add_integration(
                 integration["path"],
@@ -129,3 +146,58 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         log.info(f"function_names: {function_names}")
 
         return function_names
+
+    def correct_schema_names(self):
+        """
+        Correct schema component names to strictly alphabetic characters and update all references accordingly.
+
+        This function renames any schema components that have non-alphabetic characters and ensures all $ref
+        references in the OpenAPI specification are updated to match the renamed components.
+
+        Returns:
+            None
+        """
+        # Regex pattern to match non-alphabetic characters
+        non_alphabetic_pattern = re.compile(r"[^a-zA-Z]")
+
+        schemas = self.get_spec_part(["components", "schemas"], create=False)
+        if not schemas:
+            log.warning("No schemas found in the OpenAPI spec.")
+            return
+
+        # Map old schema names to new schema names (strictly alphabetic)
+        renamed_schemas = {}
+        for schema_name in list(schemas.keys()):
+            # Generate new schema name by replacing non-alphabetic characters with empty string
+            new_schema_name = re.sub(non_alphabetic_pattern, "", schema_name)
+            if new_schema_name != schema_name:
+                renamed_schemas[schema_name] = new_schema_name
+
+        # Apply schema renaming
+        for old_name, new_name in renamed_schemas.items():
+            schemas[new_name] = schemas.pop(old_name)
+            log.info(f"Renamed schema '{old_name}' to '{new_name}'")
+
+        # Now, update all $ref references in the OpenAPI spec to match the new schema names
+        def update_refs(data):
+            """Recursively update all $ref occurrences to match the renamed schema components."""
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if key == "$ref" and isinstance(value, str):
+                        for old_name, new_name in renamed_schemas.items():
+                            if f"#/components/schemas/{old_name}" in value:
+                                data[key] = value.replace(
+                                    f"#/components/schemas/{old_name}",
+                                    f"#/components/schemas/{new_name}",
+                                )
+                                log.info(
+                                    f"Updated $ref from '{old_name}' to '{new_name}'"
+                                )
+                    else:
+                        update_refs(value)
+            elif isinstance(data, list):
+                for item in data:
+                    update_refs(item)
+
+        # Update references in the entire OpenAPI spec
+        update_refs(self.openapi_spec)

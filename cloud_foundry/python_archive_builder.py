@@ -123,7 +123,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
         log.info(f"installing resources: {self.name}")
         if not self._sources:
             return
-        log.debug(f"sources: {self._sources}")
+        # log.debug(f"sources: {self._sources}")
 
         # Copy each source to its corresponding destination
         for destination, source in self._sources.items():

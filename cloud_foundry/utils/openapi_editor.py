@@ -3,13 +3,14 @@
 import yaml
 import json
 import os
+import re
 from typing import Union, Dict, Any, List, Mapping, Optional
 from cloud_foundry.utils.logger import logger
 
 log = logger(__name__)
 
 class OpenAPISpecEditor:
-    def __init__(self, spec: Union[str, List[str]]):
+    def __init__(self, spec: Union[Dict[str, Any], str, List[str]]):
         """
         Initialize the class by loading the OpenAPI specification.
 
@@ -19,7 +20,9 @@ class OpenAPISpecEditor:
         """
         self.openapi_spec = {}
 
-        if isinstance(spec, list):
+        if isinstance(spec, dict):
+            self.openapi_spec = spec
+        elif isinstance(spec, list):
             for individual_spec in spec:
                 self._merge_spec(individual_spec)
         elif isinstance(spec, str):
@@ -28,7 +31,7 @@ class OpenAPISpecEditor:
             raise ValueError(
                 "The spec must be a string, a list of strings, or file paths."
             )
-        log.info(f"merged spec: {self.to_yaml()}")
+        # log.info(f"merged spec: {self.to_yaml()}")
 
     def _merge_spec(self, spec: str):
         log.info(f"merge spec: {spec}")
@@ -130,6 +133,27 @@ class OpenAPISpecEditor:
         # Return the operation details
         return operations[method]
 
+    def add_operation(
+        self, path: str, method: str, operation: dict
+    ) -> "OpenAPISpecEditor":
+        """
+        Add a specific operation and return self for chaining.
+
+        Args:
+            path (str): The API path (e.g., "/token").
+            method (str): The HTTP method (e.g., "post").
+            value: The value of the attribute to add.
+
+        Returns:
+            OpenAPISpecEditor: Returns the instance for chaining.
+        """
+        # Retrieve the operation
+        path = self.get_or_create_spec_part(["paths", path], True)
+        path[method] = operation
+
+        # Return self to allow method chaining
+        return self
+
     def add_operation_attribute(
         self, path: str, method: str, attribute: str, value
     ) -> "OpenAPISpecEditor":
@@ -153,6 +177,34 @@ class OpenAPISpecEditor:
 
         # Return self to allow method chaining
         return self
+
+    def remove_attributes_by_pattern(self, pattern: str) -> None:
+        """
+        Remove all attributes in the OpenAPI specification that match the provided regex pattern.
+
+        Args:
+            pattern (str): A regex pattern to match keys in the OpenAPI spec.
+
+        Returns:
+            None
+        """
+        compiled_pattern = re.compile(pattern)
+
+        def remove_matching_keys(data: Union[Dict, List]) -> Union[Dict, List]:
+            """Recursively remove keys matching the regex pattern."""
+            if isinstance(data, dict):
+                return {
+                    key: remove_matching_keys(value)
+                    for key, value in data.items()
+                    if not compiled_pattern.match(key)
+                }
+            elif isinstance(data, list):
+                return [remove_matching_keys(item) for item in data]
+            return data
+
+        self.openapi_spec = remove_matching_keys(self.openapi_spec)
+        log.info(f"Attributes matching '{pattern}' have been removed from the spec.")
+
 
     def merge_with(self, new_spec: Union[Dict, str]) -> "OpenAPISpecEditor":
         """
