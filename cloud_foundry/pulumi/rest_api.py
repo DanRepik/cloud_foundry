@@ -55,11 +55,9 @@ class RestAPI(pulumi.ComponentResource):
         # Collect all invoke ARNs and function names from integrations and authorizers before proceeding
         integration_arns = [integration["function"].invoke_arn for integration in self.integrations]
         integration_function_names = [integration["function"].function_name for integration in self.integrations]
-        log.info(f"integration_arns: {integration_arns}")
 
         authorizer_arns = [authorizer["function"].invoke_arn for authorizer in self.authorizers]
         authorizer_function_names = [authorizer["function"].function_name for authorizer in self.authorizers]
-        log.info(f"authorizer_arns: {authorizer_arns}")
 
         # Wait for all invoke ARNs and function names to resolve and then build the API
         def build_api(invoke_arns, function_names):
@@ -149,7 +147,10 @@ class RestAPI(pulumi.ComponentResource):
         Args:
             function_names (list[str]): The list of Lambda function names to set permissions for.
         """
+        permission_names = []
         for function_name in function_names:
+            if function_name in permission_names:
+                continue
             log.info(f"Creating permission for function: {function_name}")
             aws.lambda_.Permission(
                 f"{function_name}-lambda-permission",
@@ -159,6 +160,7 @@ class RestAPI(pulumi.ComponentResource):
                 source_arn=self.rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
                 opts=pulumi.ResourceOptions(parent=self),
             )
+            permission_names.append(function_name)
 
     def _get_function_names_from_spec(self) -> list[str]:
         """
@@ -197,12 +199,14 @@ def rest_api(
 
     # Export the REST API ID and host as outputs
     pulumi.export(f"{name}-id", rest_api_instance.rest_api_id)
-    host = (
+    host =  (
         "execute-api.localhost.localstack.cloud:4566"
         if is_localstack_deployment()
         else "execute-api.us-east-1.amazonaws.com"
     )
-    pulumi.export(f"{name}-host", f"{host}/{name}")
+    pulumi.export(f"{name}-host",
+        rest_api_instance.rest_api_id.apply( lambda api_id: f"{api_id}.{host}/{name}")
+    )
 
     log.info("return rest_api")
     return rest_api_instance

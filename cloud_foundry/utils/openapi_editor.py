@@ -34,7 +34,6 @@ class OpenAPISpecEditor:
         # log.info(f"merged spec: {self.to_yaml()}")
 
     def _merge_spec(self, spec: str):
-        log.info(f"merge spec: {spec}")
         """Merge a single OpenAPI spec into the current one."""
         # Check if the string is a file path to a YAML file
         if os.path.isfile(spec) and (spec.endswith(".yaml") or spec.endswith(".yml")):
