@@ -132,25 +132,30 @@ class OpenAPISpecEditor:
         # Return the operation details
         return operations[method]
 
-    def add_operation(
-        self, path: str, method: str, operation: dict
-    ) -> "OpenAPISpecEditor":
+    def add_operation(self, path: str, method: str, operation: dict, schema_object: Optional[dict] = None):
         """
-        Add a specific operation and return self for chaining.
+        Add an operation to the OpenAPI spec with optional security handling.
 
         Args:
-            path (str): The API path (e.g., "/token").
-            method (str): The HTTP method (e.g., "post").
-            value: The value of the attribute to add.
-
-        Returns:
-            OpenAPISpecEditor: Returns the instance for chaining.
+            path (str): The API path.
+            method (str): The HTTP method.
+            operation (dict): The operation definition.
+            schema_object (Optional[dict]): The schema object to check for `x-af-security`.
         """
+
+        # Check for `x-af-security` in the schema
+        if schema_object and "x-af-security" in schema_object:
+            operation["security"] = [{key: []} for key in schema_object["x-af-security"].keys()]
+        else:
+            # Use global security if `x-af-security` is not defined
+            global_security = self.get_spec_part(["security"])
+            if global_security:
+                operation["security"] = global_security
+
         # Retrieve the operation
         path = self.get_or_create_spec_part(["paths", path], True)
         path[method] = operation
 
-        # Return self to allow method chaining
         return self
 
     def add_operation_attribute(

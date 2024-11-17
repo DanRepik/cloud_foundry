@@ -1,3 +1,7 @@
+# log_group.py
+
+import pulumi
+
 def log_group(scope: Construct, name: str, retention_in_days: int = 3) -> CloudwatchLogGroup:
     """
     Creates a CloudWatch log group.

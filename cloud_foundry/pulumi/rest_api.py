@@ -12,10 +12,10 @@ log = logger(__name__)
 class RestAPI(pulumi.ComponentResource):
     """
     A Pulumi component resource that creates and manages an AWS API Gateway REST API
-    with Lambda integrations and authorizers.
+    with Lambda integrations and token validators.
     
     This class allows you to create a REST API, attach Lambda functions to path operations 
-    (integrations), and associate authorizers (like Lambda-based authorizers) for authentication.
+    (integrations), and associate token validators for authentication.
 
     Attributes:
         rest_api (Optional[aws.apigateway.RestApi]): The AWS API Gateway REST API resource.
@@ -30,7 +30,7 @@ class RestAPI(pulumi.ComponentResource):
         name: str,
         body: Union[str, list[str]],
         integrations: list[dict] = None,
-        authorizers: list[dict] = None,
+        token_validators: list[dict] = None,
         opts=None,
     ):
         """
@@ -42,22 +42,21 @@ class RestAPI(pulumi.ComponentResource):
                                           This can be a string or a list of strings (YAML or JSON).
             integrations (list[dict], optional): A list of integrations that define the Lambda functions
                                                  attached to path operations.
-            authorizers (list[dict], optional): A list of authorizers that define Lambda authorizer functions
-                                                for authentication.
+            token_validators (list[dict], optional): A list of token validators that define authentication functions.
             opts (pulumi.ResourceOptions, optional): Additional options for the resource.
         """
         super().__init__("cloud_forge:apigw:RestAPI", name, None, opts)
         self.name = name
         self.integrations = integrations or []
-        self.authorizers = authorizers or []
+        self.token_validators = token_validators or []
         self.editor = AWSOpenAPISpecEditor(body)
 
-        # Collect all invoke ARNs and function names from integrations and authorizers before proceeding
+        # Collect all invoke ARNs and function names from integrations and token validators before proceeding
         integration_arns = [integration["function"].invoke_arn for integration in self.integrations]
         integration_function_names = [integration["function"].function_name for integration in self.integrations]
 
-        authorizer_arns = [authorizer["function"].invoke_arn for authorizer in self.authorizers]
-        authorizer_function_names = [authorizer["function"].function_name for authorizer in self.authorizers]
+        token_validator_arns = [validator["function"].invoke_arn for validator in self.token_validators]
+        token_validator_function_names = [validator["function"].function_name for validator in self.token_validators]
 
         # Wait for all invoke ARNs and function names to resolve and then build the API
         def build_api(invoke_arns, function_names):
@@ -65,8 +64,8 @@ class RestAPI(pulumi.ComponentResource):
             Build the API by processing the OpenAPI spec, adding integrations, and creating the REST API resource.
 
             Args:
-                invoke_arns (list[str]): A list of Lambda function ARNs for integrations and authorizers.
-                function_names (list[str]): A list of Lambda function names for integrations and authorizers.
+                invoke_arns (list[str]): A list of Lambda function ARNs for integrations and token validators.
+                function_names (list[str]): A list of Lambda function names for integrations and token validators.
 
             Returns:
                 pulumi.Output[str]: The REST API ID.
@@ -75,8 +74,8 @@ class RestAPI(pulumi.ComponentResource):
             return self.rest_api.id
 
         # Set up the output that will store the REST API ID
-        all_arns = integration_arns + authorizer_arns
-        all_function_names = integration_function_names + authorizer_function_names
+        all_arns = integration_arns + token_validator_arns
+        all_function_names = integration_function_names + token_validator_function_names
         # Pulumi will resolve both ARNs and function names before proceeding to build the API
         self.rest_api_id = pulumi.Output.all(*all_arns, *all_function_names).apply(
             lambda arns_and_names: build_api(arns_and_names[:len(all_arns)], arns_and_names[len(all_arns):])
@@ -84,7 +83,7 @@ class RestAPI(pulumi.ComponentResource):
 
     def _build(self, invoke_arns: list[str], function_names: list[str]) -> pulumi.Output[None]:
         """
-        Build the REST API and create the necessary integrations, authorizers, and deployment.
+        Build the REST API and create the necessary integrations, token validators, and deployment.
 
         Args:
             invoke_arns (list[str]): The list of Lambda function ARNs.
@@ -95,12 +94,12 @@ class RestAPI(pulumi.ComponentResource):
         """
         log.info(f"running build")
 
-        # Process integrations and authorizers using the provided ARNs and function names
+        # Process integrations and token validators using the provided ARNs and function names
         self.editor.process_integrations(
             self.integrations, invoke_arns[:len(self.integrations)], function_names[:len(self.integrations)]
         )
-        self.editor.process_authorizers(
-            self.authorizers, invoke_arns[len(self.integrations):], function_names[len(self.integrations):]
+        self.editor.process_token_validators(
+            self.token_validators, invoke_arns[len(self.integrations):], function_names[len(self.integrations):]
         )
 
         # Write the updated OpenAPI spec to a file for logging or debugging
@@ -173,9 +172,9 @@ class RestAPI(pulumi.ComponentResource):
 
 def rest_api(
     name: str,
-    body: str,
+    body: Union[str, list[str]],
     integrations: list[dict] = None,
-    authorizers: list[dict] = None,
+    token_validators: list[dict] = None,
 ):
     """
     Helper function to create and configure a REST API using the RestAPI component.
@@ -185,15 +184,14 @@ def rest_api(
         body (str): The OpenAPI specification file path.
         integrations (list[dict], optional): A list of integrations that define the Lambda functions
                                              attached to path operations.
-        authorizers (list[dict], optional): A list of authorizers that define Lambda authorizer functions
-                                            for authentication.
+        token_validators (list[dict], optional): A list of token validators that define authentication functions.
 
     Returns:
         RestAPI: The created REST API component resource.
     """
     log.info(f"rest_api name: {name}")
     rest_api_instance = RestAPI(
-        name, body=body, integrations=integrations, authorizers=authorizers
+        name, body=body, integrations=integrations, token_validators=token_validators
     )
     log.info("built rest_api")
 
@@ -210,4 +208,3 @@ def rest_api(
 
     log.info("return rest_api")
     return rest_api_instance
-

@@ -1,7 +1,6 @@
 # aws_openapi_editor.py
 
 import re
-
 from typing import Union, Dict, List
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.openapi_editor import OpenAPISpecEditor
@@ -20,7 +19,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         """
         super().__init__(spec)
 
-    def add_token_authorizer(
+    def add_token_validator(
         self, name: str, function_name: str, authentication_invoke_arn: str
     ):
         # Use get_or_create_spec_part to ensure 'components' and 'securitySchemes' exist
@@ -43,24 +42,23 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             },
         }
 
-    def process_authorizers(
-        self, authorizers: list[dict], invoke_arns: list[str], function_names: list[str]
+    def process_token_validators(
+        self, token_validators: list[dict], invoke_arns: list[str], function_names: list[str]
     ):
         """
-        Process and add each authorizer to the OpenAPI spec using the resolved invoke_arns and function names.
+        Process and add each token validator to the OpenAPI spec using the resolved invoke_arns and function names.
 
         Args:
-            authorizers (list[dict]): List of authorizers defined in the configuration.
-            invoke_arns (list[str]): Resolved ARNs of the authorizer functions.
-            function_names (list[str]): Resolved function names of the authorizer functions.
+            token_validators (list[dict]): List of token validators defined in the configuration.
+            invoke_arns (list[str]): Resolved ARNs of the token validator functions.
+            function_names (list[str]): Resolved function names of the token validator functions.
         """
-        log.info(f"process authorizers: {invoke_arns}")
-        for authorizer, invoke_arn, function_name in zip(
-            authorizers, invoke_arns, function_names
+        log.info(f"process token validators: {invoke_arns}")
+        for validator, invoke_arn, function_name in zip(
+            token_validators, invoke_arns, function_names
         ):
-            log.info(f"add authorizer: {authorizer['name']}")
-            if authorizer["type"] == "token":
-                self.add_token_authorizer(authorizer["name"], function_name, invoke_arn)
+            log.info(f"add token validator: {validator['name']}")
+            self.add_token_validator(validator["name"], function_name, invoke_arn)
 
     def _add_integration(
         self, path: str, method: str, function_name: str, invoke_arn: str
@@ -105,11 +103,9 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             invoke_arns (list[str]): Resolved ARNs of the integration functions.
             function_names (list[str]): Resolved function names of the integration functions.
         """
-        log.info(f"process integrations: {invoke_arns}")
         for integration, invoke_arn, function_name in zip(
             integrations, invoke_arns, function_names
         ):
-            log.info(f"add integration path: {integration['path']}")
             self._add_integration(
                 integration["path"],
                 integration["method"],
@@ -189,9 +185,6 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                                 data[key] = value.replace(
                                     f"#/components/schemas/{old_name}",
                                     f"#/components/schemas/{new_name}",
-                                )
-                                log.info(
-                                    f"Updated $ref from '{old_name}' to '{new_name}'"
                                 )
                     else:
                         update_refs(value)
