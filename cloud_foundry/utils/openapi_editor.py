@@ -145,12 +145,12 @@ class OpenAPISpecEditor:
 
         # Check for `x-af-security` in the schema
         if schema_object and "x-af-security" in schema_object:
-            operation["security"] = [{key: []} for key in schema_object["x-af-security"].keys()]
+            operation["security"] = [[{key: []} for key in schema_object["x-af-security"].keys()]]
         else:
             # Use global security if `x-af-security` is not defined
             global_security = self.get_spec_part(["security"])
             if global_security:
-                operation["security"] = global_security
+                operation["security"] = [global_security]
 
         # Retrieve the operation
         path = self.get_or_create_spec_part(["paths", path], True)

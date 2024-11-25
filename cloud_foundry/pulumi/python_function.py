@@ -14,9 +14,11 @@ def python_function(
     handler: str = None,
     memory_size: int = None,
     timeout: int = None,
-    sources: dict[str, str] = None,
-    requirements: list[str] = None,
-    environment: dict[str, str] = None,
+    sources: dict[str, str] = [],
+    requirements: list[str] = [],
+    policy_statements: list[str] = [],
+    environment: dict[str, str] = [],
+    vpc_config: dict= None
 ) -> Function:
     archive_builder = PythonArchiveBuilder(
         name=f"{name}-archive-builder",
@@ -32,4 +34,6 @@ def python_function(
         handler=handler,
         archive_location=archive_builder.location(),
         environment=environment,
+        policy_statements=policy_statements,
+        vpc_config=vpc_config
     )

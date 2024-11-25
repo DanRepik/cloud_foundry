@@ -6,6 +6,7 @@ from cloud_foundry.utils.logger import logger
 
 log = logger(__name__)
 
+
 class Function(pulumi.ComponentResource):
     lambda_: aws.lambda_.Function
 
@@ -20,8 +21,8 @@ class Function(pulumi.ComponentResource):
         timeout: int = None,
         memory_size: int = None,
         environment: dict[str, str] = None,
-        actions: list[str] = None,
-        vpc_config: dict = None,  # New argument for VPC configuration
+        policy_statements: list = [],
+        vpc_config: dict = None,
         opts=None,
     ):
         super().__init__("cloud_forge:lambda:Function", name, {}, opts)
@@ -33,15 +34,17 @@ class Function(pulumi.ComponentResource):
         self.environment = environment or {}
         self.memory_size = memory_size
         self.timeout = timeout
-        self.actions = actions
-        self.vpc_config = vpc_config or {}  # Store VPC configuration
+        self.policy_statements = policy_statements
+        self.vpc_config = vpc_config or {}
         self._function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
 
         # Check if we should import an existing Lambda function
         if not archive_location and not hash and not runtime and not handler:
             log.info(f"Importing existing Lambda function: {self._function_name}")
             self.lambda_ = aws.lambda_.Function.get(
-                f"{self.name}-lambda", self.name, opts=pulumi.ResourceOptions(parent=self)
+                f"{self.name}-lambda",
+                self.name,
+                opts=pulumi.ResourceOptions(parent=self),
             )
         else:
             self._create_lambda_function()
@@ -49,7 +52,7 @@ class Function(pulumi.ComponentResource):
     @property
     def invoke_arn(self) -> pulumi.Output[str]:
         return self.lambda_.invoke_arn
-    
+
     @property
     def function_name(self) -> pulumi.Output[str]:
         return self.lambda_.name
@@ -63,8 +66,8 @@ class Function(pulumi.ComponentResource):
         vpc_config_args = None
         if self.vpc_config:
             vpc_config_args = aws.lambda_.FunctionVpcConfigArgs(
-                subnet_ids=self.vpc_config.get('subnet_ids', []),
-                security_group_ids=self.vpc_config.get('security_group_ids', []),
+                subnet_ids=self.vpc_config.get("subnet_ids", []),
+                security_group_ids=self.vpc_config.get("security_group_ids", []),
             )
 
         self.lambda_ = aws.lambda_.Function(
@@ -111,33 +114,74 @@ class Function(pulumi.ComponentResource):
         role = aws.iam.Role(
             f"{self.name}-role",
             assume_role_policy=assume_role_policy.json,
-            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-lambda-execution",
+            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-lambda",
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        policy_document = aws.iam.get_policy_document(
-            statements=[
+        policy_statements = []
+        log.info(f"policy_statements: {self.policy_statements}")
+        for statement in self.policy_statements:
+            log.info(f"statement: {statement}")
+            normalized_statement = {key.lower(): value for key, value in statement.items()}
+            if isinstance(statement, dict):
+                policy_statements.append(
+                    aws.iam.GetPolicyDocumentStatementArgs(
+                        effect=normalized_statement["effect"],
+                        actions=normalized_statement["actions"],
+                        resources=normalized_statement["resources"],
+                    )
+                )
+            else:
+                policy_statements.append(statement)
+
+        policy_statements.append(
+            aws.iam.GetPolicyDocumentStatementArgs(
+                effect="Allow",
+                actions=[
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents",
+                ],
+                resources=["*"],
+            )
+        )
+
+        if self.vpc_config:
+            policy_statements.append(
                 aws.iam.GetPolicyDocumentStatementArgs(
                     effect="Allow",
-                    actions=(
-                        (self.actions or [])
-                        + [
-                            "logs:CreateLogGroup",
-                            "logs:CreateLogStream",
-                            "logs:PutLogEvents",
-                        ]
-                    ),
+                    actions=[
+                        "ec2:CreateNetworkInterface",
+                        "ec2:DescribeNetworkInterfaces",
+                        "ec2:DeleteNetworkInterface",
+                        "ec2:AssignPrivateIpAddresses",
+                        "ec2:UnassignPrivateIpAddresses",
+                    ],
                     resources=["*"],
                 )
-            ]
-        )
+            )
+            policy_statements.append(
+                aws.iam.GetPolicyDocumentStatementArgs(
+                    effect="Allow",
+                    actions=[
+                        "ec2:DescribeSubnets",
+                        "ec2:DescribeSecurityGroups",
+                        "ec2:DescribeVpcEndpoints",
+                    ],
+                    resources=["*"],
+                )
+            )
+
+        log.info(f"policy_statements: {policy_statements}")
+
+        policy_document = aws.iam.get_policy_document(statements=policy_statements)
 
         log.info(f"Policy document: {policy_document.json}")
         aws.iam.RolePolicy(
             f"{self.name}-role-policy",
             role=role.id,
             policy=policy_document.json,
-            opts=pulumi.ResourceOptions(depends_on=[role], parent=self)
+            opts=pulumi.ResourceOptions(depends_on=[role], parent=self),
         )
 
         return role
@@ -165,12 +209,12 @@ def function(
         name,
         archive_location=archive_location,
         hash=hash,
-        runtime=runtime, 
-        handler=handler, 
-        timeout=timeout, 
+        runtime=runtime,
+        handler=handler,
+        timeout=timeout,
         memory_size=memory_size,
-        environment=environment, 
-        actions=actions, 
-        vpc_config=vpc_config, 
-        opts=opts
+        environment=environment,
+        actions=actions,
+        vpc_config=vpc_config,
+        opts=opts,
     )
