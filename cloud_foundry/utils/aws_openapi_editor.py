@@ -1,7 +1,7 @@
 # aws_openapi_editor.py
 
 import re
-from typing import Union, Dict, List
+from typing import Union, Dict, List, Optional
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.openapi_editor import OpenAPISpecEditor
 
@@ -9,7 +9,7 @@ log = logger(__name__)
 
 
 class AWSOpenAPISpecEditor(OpenAPISpecEditor):
-    def __init__(self, spec: Union[Dict, str, List[str]]):
+    def __init__(self, spec: Optional[Union[Dict, str, List[str]]]):
         """
         Initialize the class by loading the OpenAPI specification.
 

@@ -9,7 +9,7 @@ class ContentRepository(pulumi.ComponentResource):
     site_bucket: aws.s3.Bucket
 
     def __init__(self, name: str, bucket_name: Optional[str] = None, publishers: Optional[List[dict]] = None, opts: pulumi.ResourceOptions = None):
-        super().__init__("cloud_forge:origin:ContentRepository", name, {}, opts)
+        super().__init__("cloudy_foundry:origin:ContentRepository", name, {}, opts)
 
         # Define the bucket name (use the provided or generate a default)
         final_bucket_name = bucket_name or self._generate_bucket_name(name)

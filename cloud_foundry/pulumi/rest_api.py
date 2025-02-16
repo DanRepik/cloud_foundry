@@ -6,6 +6,7 @@ from typing import Optional, Union
 from cloud_foundry.utils.logger import logger, write_logging_file
 from cloud_foundry.utils.localstack import is_localstack_deployment
 from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
+from cloud_foundry.pulumi.api_waf import RestAPIFirewall, GatewayRestApiWAF
 
 log = logger(__name__)
 
@@ -31,6 +32,7 @@ class RestAPI(pulumi.ComponentResource):
         body: Union[str, list[str]],
         integrations: list[dict] = None,
         token_validators: list[dict] = None,
+        firewall: Optional[RestAPIFirewall] = None,
         opts=None,
     ):
         """
@@ -45,11 +47,12 @@ class RestAPI(pulumi.ComponentResource):
             token_validators (list[dict], optional): A list of token validators that define authentication functions.
             opts (pulumi.ResourceOptions, optional): Additional options for the resource.
         """
-        super().__init__("cloud_forge:apigw:RestAPI", name, None, opts)
+        super().__init__("cloudy_foundry:apigw:RestAPI", name, None, opts)
         self.name = name
         self.integrations = integrations or []
         self.token_validators = token_validators or []
         self.editor = AWSOpenAPISpecEditor(body)
+        self.firewall = firewall
 
         # Collect all invoke ARNs and function names from integrations and token validators before proceeding
         integration_arns = [integration["function"].invoke_arn for integration in self.integrations]
@@ -125,7 +128,7 @@ class RestAPI(pulumi.ComponentResource):
         )
 
         log.info(f"running build stage")
-        aws.apigateway.Stage(
+        stage = aws.apigateway.Stage(
             f"{self.name}-stage",
             rest_api=self.rest_api.id,
             deployment=deployment.id,
@@ -133,6 +136,16 @@ class RestAPI(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(parent=self),
         )
 
+        if self.firewall:
+            log.info("setting up firewall")
+            waf = GatewayRestApiWAF(f"{self.name}-waf", self.firewall)
+            """
+            web_acl_association = aws.wafv2.WebAclAssociation(
+                f"{self.name}-waf-association",
+                resource_arn=stage.arn,
+                web_acl_arn=waf.arn)
+            """
+            
         # Register the output for the REST API ID
         self.register_outputs({"rest_api_id": self.rest_api.id})
 
@@ -175,6 +188,7 @@ def rest_api(
     body: Union[str, list[str]],
     integrations: list[dict] = None,
     token_validators: list[dict] = None,
+    firewall: RestAPIFirewall = None,
 ):
     """
     Helper function to create and configure a REST API using the RestAPI component.
@@ -191,7 +205,7 @@ def rest_api(
     """
     log.info(f"rest_api name: {name}")
     rest_api_instance = RestAPI(
-        name, body=body, integrations=integrations, token_validators=token_validators
+        name, body=body, integrations=integrations, token_validators=token_validators, firewall=firewall
     )
     log.info("built rest_api")
 

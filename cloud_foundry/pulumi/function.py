@@ -25,7 +25,7 @@ class Function(pulumi.ComponentResource):
         vpc_config: dict = None,
         opts=None,
     ):
-        super().__init__("cloud_forge:lambda:Function", name, {}, opts)
+        super().__init__("cloudy_foundry:lambda:Function", name, {}, opts)
         self.name = name
         self.archive_location = archive_location
         self.hash = hash
