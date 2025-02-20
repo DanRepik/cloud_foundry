@@ -50,11 +50,11 @@ snsTopic --> sqsQueue
 
 @enduml
 ```
-* **Distribution:** 
+* **Distribution:**
 * * **CDB** - content delivery can be connected to multiple origins (Rest API, Site Bucket, Document Buckets, and WebSocket API).
 * **Origins:**
-Elements in this layer provide content, consists of backend resources like 
-* * **Rest API**, 
+Elements in this layer provide content, consists of backend resources like
+* * **Rest API**,
 * * **Site Bucket**
 * * **Document Bucket**
 * * **WebSocket API**
@@ -142,7 +142,7 @@ def handler(event, context):
     print(f"event: {event}")
     # Extract the 'name' parameter from the query string; default to 'World'
     name = (event.get("queryStringParameters", None) or {}).get("name", "World")
-    
+
     # Return a JSON response with the greeting message
     return {
         "statusCode": 200,
@@ -167,7 +167,7 @@ For instance, the function for the `/greet` path operation can be defined as:
 
 ```python
 greet_function = cloud_foundry.python_function(
-    "greet-function", 
+    "greet-function",
     sources={"app.py": "./greet_app.py"}
 )
 ```
@@ -190,8 +190,8 @@ greet_api = cloud_foundry.rest_api(
             "path": "/greet",
             "method": "get",
             "function": cloud_foundry.python_function(
-                "greet-function", 
-                handler="app.handler", 
+                "greet-function",
+                handler="app.handler",
                 sources={"app.py": "./greet_app.py"}
             ),
         },

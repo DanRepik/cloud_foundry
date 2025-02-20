@@ -10,12 +10,14 @@ from cloud_foundry.archive_builder import ArchiveBuilder
 
 log = logger(__name__)
 
+
 class PythonArchiveBuilder(ArchiveBuilder):
     """
     A class responsible for building Python Lambda function archives with dependencies
-    and source code. The class supports caching through hash comparisons to avoid redundant 
+    and source code. The class supports caching through hash comparisons to avoid redundant
     builds and includes functionality to install Python packages in the Lambda package.
     """
+
     _hash: str  # Stores the computed hash of the archive
     _location: str  # Stores the location of the generated ZIP archive
 
@@ -99,7 +101,9 @@ class PythonArchiveBuilder(ArchiveBuilder):
         try:
             # Create the archive file
             archive_name = self._location.replace(".zip", "")
-            with zipfile.ZipFile(f"{archive_name}.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+            with zipfile.ZipFile(
+                f"{archive_name}.zip", "w", zipfile.ZIP_DEFLATED
+            ) as archive:
                 # Include both 'staging' and 'libs' folders in the archive
                 for folder in ["staging", "libs"]:
                     folder_path = os.path.join(self._base_dir, folder)

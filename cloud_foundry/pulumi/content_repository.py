@@ -5,10 +5,17 @@ from cloud_foundry.utils.logger import logger
 
 log = logger(__name__)
 
+
 class ContentRepository(pulumi.ComponentResource):
     site_bucket: aws.s3.Bucket
 
-    def __init__(self, name: str, bucket_name: Optional[str] = None, publishers: Optional[List[dict]] = None, opts: pulumi.ResourceOptions = None):
+    def __init__(
+        self,
+        name: str,
+        bucket_name: Optional[str] = None,
+        publishers: Optional[List[dict]] = None,
+        opts: pulumi.ResourceOptions = None,
+    ):
         super().__init__("cloudy_foundry:origin:ContentRepository", name, {}, opts)
 
         # Define the bucket name (use the provided or generate a default)
@@ -21,7 +28,7 @@ class ContentRepository(pulumi.ComponentResource):
             resource_name=f"{name}-bucket",
             bucket=final_bucket_name,
             force_destroy=True,  # Assuming this is similar to the `is_local` flag in the original code
-            tags={"Name": f"{name}-bucket"}
+            tags={"Name": f"{name}-bucket"},
         )
 
         # Ownership controls: BucketOwnerPreferred
@@ -30,7 +37,7 @@ class ContentRepository(pulumi.ComponentResource):
             bucket=self.site_bucket.bucket,
             rule=aws.s3.BucketOwnershipControlsRuleArgs(
                 object_ownership="BucketOwnerPreferred"
-            )
+            ),
         )
 
         # Set ACL to private (depends on ownership controls)
@@ -38,20 +45,22 @@ class ContentRepository(pulumi.ComponentResource):
             resource_name=f"{name}-acl",
             acl="private",
             bucket=self.site_bucket.bucket,
-            opts=pulumi.ResourceOptions(depends_on=[bucket_ownership_controls])
+            opts=pulumi.ResourceOptions(depends_on=[bucket_ownership_controls]),
         )
 
         # CORS Configuration
         aws.s3.BucketCorsConfigurationV2(
             resource_name=f"{name}-bucket-cors",
             bucket=self.site_bucket.id,
-            cors_rules=[aws.s3.BucketCorsConfigurationV2RuleArgs(
-                allowed_headers=["*"],
-                allowed_methods=["PUT", "POST"],
-                allowed_origins=["http://localhost:3030"],
-                expose_headers=["ETag"],
-                max_age_seconds=3000,
-            )]
+            cors_rules=[
+                aws.s3.BucketCorsConfigurationV2RuleArgs(
+                    allowed_headers=["*"],
+                    allowed_methods=["PUT", "POST"],
+                    allowed_origins=["http://localhost:3030"],
+                    expose_headers=["ETag"],
+                    max_age_seconds=3000,
+                )
+            ],
         )
 
         # Enable versioning
@@ -60,7 +69,7 @@ class ContentRepository(pulumi.ComponentResource):
             bucket=self.site_bucket.id,
             versioning_configuration=aws.s3.BucketVersioningVersioningConfigurationArgs(
                 status="Enabled"
-            )
+            ),
         )
 
         # Block all public access
@@ -70,7 +79,7 @@ class ContentRepository(pulumi.ComponentResource):
             block_public_acls=True,
             block_public_policy=True,
             ignore_public_acls=True,
-            restrict_public_buckets=True
+            restrict_public_buckets=True,
         )
 
         # Handle publishers (if provided)
@@ -79,10 +88,12 @@ class ContentRepository(pulumi.ComponentResource):
                 self._create_publisher(name, publisher)
 
         # Register the output for this component
-        self.register_outputs({
-            "bucket": self.site_bucket.bucket,
-            "bucket_arn": self.site_bucket.arn,
-        })
+        self.register_outputs(
+            {
+                "bucket": self.site_bucket.bucket,
+                "bucket_arn": self.site_bucket.arn,
+            }
+        )
 
     def _generate_bucket_name(self, name: str) -> str:
         """
@@ -94,14 +105,17 @@ class ContentRepository(pulumi.ComponentResource):
         """
         Create a UIPublisher for the bucket based on the provided publisher args.
         """
-        log.info(f"Creating publisher: {publisher['name']} for bucket {self.site_bucket.bucket}")
-        # Assuming UIPublisher takes in site_bucket and publisher as arguments, 
+        log.info(
+            f"Creating publisher: {publisher['name']} for bucket {self.site_bucket.bucket}"
+        )
+        # Assuming UIPublisher takes in site_bucket and publisher as arguments,
         # adapt this to whatever the publisher logic requires.
         UIPublisher(
             name=f"{name}-{publisher['name']}",
             bucket=self.site_bucket,
-            publisher_args=publisher
+            publisher_args=publisher,
         )
+
 
 # Example usage
 site_bucket = SiteBucket(
@@ -109,6 +123,6 @@ site_bucket = SiteBucket(
     bucket_name="my-custom-bucket",
     publishers=[
         {"name": "publisher1", "some_param": "value1"},
-        {"name": "publisher2", "some_param": "value2"}
-    ]
+        {"name": "publisher2", "some_param": "value2"},
+    ],
 )

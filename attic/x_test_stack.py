@@ -10,7 +10,10 @@ from typing import Callable, Dict, Optional, Tuple
 # Type alias for the pulumi program function
 PulumiProgram = Callable[[], None]
 
-def pulumi_stack_up(stack_name: str, project_name: str, pulumi_program: PulumiProgram) -> Tuple[auto.Stack, Dict[str, auto.OutputValue]]:
+
+def pulumi_stack_up(
+    stack_name: str, project_name: str, pulumi_program: PulumiProgram
+) -> Tuple[auto.Stack, Dict[str, auto.OutputValue]]:
     """
     Sets up and runs a Pulumi stack using the specified program.
 
@@ -22,7 +25,7 @@ def pulumi_stack_up(stack_name: str, project_name: str, pulumi_program: PulumiPr
     Returns:
         Tuple[auto.Stack, Dict[str, auto.OutputValue]]: The deployed Pulumi stack and its outputs.
     """
-    
+
     # Define the local backend for the stack state
     local_backend_path = os.path.join(os.getcwd(), "temp", "pulumi-local-backend")
 
@@ -47,7 +50,7 @@ def pulumi_stack_up(stack_name: str, project_name: str, pulumi_program: PulumiPr
         stack_name=stack_name,
         project_name=project_name,
         program=pulumi_program,
-        opts=workspace_opts
+        opts=workspace_opts,
     )
 
     # Set configuration options for the stack
@@ -59,6 +62,7 @@ def pulumi_stack_up(stack_name: str, project_name: str, pulumi_program: PulumiPr
     # Return the stack and its outputs
     return stack, up_res.outputs
 
+
 def pulumi_stack_down(stack):
     # Teardown (destroy the stack after the test)
     stack.destroy()
@@ -68,7 +72,9 @@ def pulumi_stack_down(stack):
     if os.path.exists(local_backend_path):
         shutil.rmtree(local_backend_path)
 
+
 _localstack_provider: Optional[aws.Provider] = None
+
 
 def localstack_provider() -> aws.Provider:
     global _localstack_provider
@@ -76,17 +82,16 @@ def localstack_provider() -> aws.Provider:
         _localstack_provider = aws.Provider(
             "localstack",
             skip_credentials_validation=True,  # Ensure AWS credential validation is skipped
-            skip_metadata_api_check=True,      # Ensure AWS metadata API validation is skipped
+            skip_metadata_api_check=True,  # Ensure AWS metadata API validation is skipped
             s3_use_path_style=True,
             region="us-east-2",
             endpoints=[
-                aws.ProviderEndpointArgs(
-                    s3="http://localhost.localstack.cloud:4566"
-                )
-            ]
+                aws.ProviderEndpointArgs(s3="http://localhost.localstack.cloud:4566")
+            ],
         )
     print(f"localstack_provider: {_localstack_provider}")
     return _localstack_provider
+
 
 # Example of a test using the common function
 def test_bucket_creation() -> None:

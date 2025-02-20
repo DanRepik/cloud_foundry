@@ -5,6 +5,7 @@ from cloud_foundry.utils.logger import logger
 
 log = logger(__name__)
 
+
 class HashComparator:
     def __init__(self, hash_algorithm="sha256"):
         self.hash_algorithm = hash_algorithm
@@ -28,7 +29,13 @@ class HashComparator:
                 hasher.update(chunk)
         return hasher.hexdigest()
 
-    def hash_folder(self, folder_path, include_regex=None, exclude_regex=None, include_metadata=False):
+    def hash_folder(
+        self,
+        folder_path,
+        include_regex=None,
+        exclude_regex=None,
+        include_metadata=False,
+    ):
         """
         Calculates a hash of the folder's contents (including its files and subfolders).
 
@@ -58,15 +65,17 @@ class HashComparator:
 
                 # Update the folder hash with the file path and file content
                 relative_path = os.path.relpath(file_path, folder_path)
-                hasher.update(relative_path.encode())  # Update the hash with the file path
-                
+                hasher.update(
+                    relative_path.encode()
+                )  # Update the hash with the file path
+
                 if include_metadata:
                     # Include metadata such as file modification time, size, and permissions
                     stat = os.stat(file_path)
                     hasher.update(str(stat.st_mtime).encode())  # Modification time
-                    hasher.update(str(stat.st_size).encode())   # File size
-                    hasher.update(str(stat.st_mode).encode())   # File permissions
-                
+                    hasher.update(str(stat.st_size).encode())  # File size
+                    hasher.update(str(stat.st_mode).encode())  # File permissions
+
                 # Hash file content and update the folder hash
                 with open(file_path, "rb") as f:
                     while chunk := f.read(4096):

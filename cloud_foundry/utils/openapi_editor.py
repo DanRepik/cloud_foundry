@@ -9,8 +9,9 @@ from cloud_foundry.utils.logger import logger
 
 log = logger(__name__)
 
+
 class OpenAPISpecEditor:
-    def __init__(self, spec: Union[Dict[str, Any], str, List[str]]):
+    def __init__(self, spec: Optional[Union[Dict[str, Any], str, List[str]]] = None):
         """
         Initialize the class by loading the OpenAPI specification.
 
@@ -27,11 +28,6 @@ class OpenAPISpecEditor:
                 self._merge_spec(individual_spec)
         elif isinstance(spec, str):
             self._merge_spec(spec)
-        else:
-            raise ValueError(
-                "The spec must be a string, a list of strings, or file paths."
-            )
-        # log.info(f"merged spec: {self.to_yaml()}")
 
     def _merge_spec(self, spec: str):
         """Merge a single OpenAPI spec into the current one."""
@@ -132,7 +128,13 @@ class OpenAPISpecEditor:
         # Return the operation details
         return operations[method]
 
-    def add_operation(self, path: str, method: str, operation: dict, schema_object: Optional[dict] = None):
+    def add_operation(
+        self,
+        path: str,
+        method: str,
+        operation: dict,
+        schema_object: Optional[dict] = None,
+    ):
         """
         Add an operation to the OpenAPI spec with optional security handling.
 
@@ -145,7 +147,9 @@ class OpenAPISpecEditor:
 
         # Check for `x-af-security` in the schema
         if schema_object and "x-af-security" in schema_object:
-            operation["security"] = [[{key: []} for key in schema_object["x-af-security"].keys()]]
+            operation["security"] = [
+                [{key: []} for key in schema_object["x-af-security"].keys()]
+            ]
         else:
             # Use global security if `x-af-security` is not defined
             global_security = self.get_spec_part(["security"])
@@ -208,7 +212,6 @@ class OpenAPISpecEditor:
 
         self.openapi_spec = remove_matching_keys(self.openapi_spec)
         log.info(f"Attributes matching '{pattern}' have been removed from the spec.")
-
 
     def merge_with(self, new_spec: Union[Dict, str]) -> "OpenAPISpecEditor":
         """

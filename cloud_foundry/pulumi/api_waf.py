@@ -75,7 +75,7 @@ class GatewayRestApiWAF:
                     name="commonSet",
                     priority=priority,
                     action=wafv2.WebAclRuleActionArgs(block={}),
-#                    override_action=wafv2.WebAclRuleOverrideActionArgs(none=None),
+                    #                    override_action=wafv2.WebAclRuleOverrideActionArgs(none=None),
                     visibility_config=wafv2.WebAclRuleVisibilityConfigArgs(
                         cloudwatch_metrics_enabled=True,
                         metric_name="commonSetMetric",
@@ -138,18 +138,17 @@ class GatewayRestApiWAF:
             # Add a rate-limiting rule to block excessive requests based on IP.
             rules.append(
                 wafv2.WebAclRuleArgs(
-                    name= "rateLimitRule",
-                    priority= priority,
+                    name="rateLimitRule",
+                    priority=priority,
                     action=wafv2.WebAclRuleActionArgs(block={}),
                     visibility_config=wafv2.WebAclRuleVisibilityConfigArgs(
-                        cloudwatch_metrics_enabled= True,
-                        metric_name= "rateLimitRuleMetric",
-                        sampled_requests_enabled= True,
+                        cloudwatch_metrics_enabled=True,
+                        metric_name="rateLimitRuleMetric",
+                        sampled_requests_enabled=True,
                     ),
                     statement=wafv2.WebAclRuleStatementArgs(
                         rate_based_statement=wafv2.WebAclRuleStatementRateBasedStatementArgs(
-                            limit= firewall.rate_limit,
-                            aggregate_key_type= "IP"
+                            limit=firewall.rate_limit, aggregate_key_type="IP"
                         )
                     ),
                 )
@@ -180,7 +179,6 @@ class GatewayRestApiWAF:
                 }
             )
             priority += 1
-
 
         log.debug(f"rules: {rules}")
         # Create the WAF resource using the defined rules.

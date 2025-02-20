@@ -19,7 +19,7 @@ class CloudFrontWAF(Construct):
             scope="CLOUDFRONT",
             description="AWS CF WAF",
             default_action={"allow": {}},
-            rule=[ *self.access_white_list(scope, id)],
+            rule=[*self.access_white_list(scope, id)],
             visibility_config={
                 "cloudwatch_metrics_enabled": True,
                 "metric_name": "DefaultAllowMetric",
@@ -32,20 +32,20 @@ class CloudFrontWAF(Construct):
         dev_access_ip_set = DataAwsWafv2IpSet(
             scope,
             make_id(scope, f"{id}-ip-set"),
-            name=scope.config.get('access_white_list', "DevAccessWhiteList"),
+            name=scope.config.get("access_white_list", "DevAccessWhiteList"),
             scope="CLOUDFRONT",
         )
 
         # Define rules for DevAccessWhiteList
         return [
             Wafv2WebAclRule(
-                name= "AllowDevAccess",
-                priority= 0,
-                statement= {
+                name="AllowDevAccess",
+                priority=0,
+                statement={
                     "ip_set_reference_statement": {"arn": dev_access_ip_set.arn}
                 },
-                action= {"allow": {}},
-                visibility_config= {
+                action={"allow": {}},
+                visibility_config={
                     "sampled_requests_enabled": True,
                     "cloudwatch_metrics_enabled": True,
                     "metric_name": "AllowDev",

@@ -1,5 +1,7 @@
 # aws_openapi_editor.py
 
+import pulumi_aws as aws
+import json
 import re
 from typing import Union, Dict, List, Optional
 from cloud_foundry.utils.logger import logger
@@ -17,7 +19,19 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             spec (Union[Dict, str]): A dictionary containing the OpenAPI specification
                                      or a string representing YAML content or a file path.
         """
-        super().__init__(spec)
+        super().__init__(
+            spec
+            or {
+                "openapi": "3.0.3",
+                "info": {
+                    "title": "API",
+                    "version": "1.0.0",
+                    "description": "Generated OpenAPI Spec",
+                },
+                "paths": {},
+                "components": {"schemas": {}, "securitySchemes": {}},
+            }
+        )
 
     def add_token_validator(
         self, name: str, function_name: str, authentication_invoke_arn: str
@@ -36,14 +50,16 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             "x-amazon-apigateway-authorizer": {
                 "type": "token",
                 "authorizerUri": authentication_invoke_arn,
-                "identityValidationExpression": "^Bearer [-0-9a-zA-Z._]*$",
                 "identitySource": "method.request.header.Authorization",
                 "authorizerResultTtlInSeconds": 60,
             },
         }
 
     def process_token_validators(
-        self, token_validators: list[dict], invoke_arns: list[str], function_names: list[str]
+        self,
+        token_validators: list[dict],
+        invoke_arns: list[str],
+        function_names: list[str],
     ):
         """
         Process and add each token validator to the OpenAPI spec using the resolved invoke_arns and function names.
@@ -112,6 +128,49 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                 function_name,
                 invoke_arn,
             )
+
+    def process_content(self, content: list[dict], credentials_arn: str):
+        for item in content:
+            path = item.get("path")
+            bucket_name = item.get("bucket_name")
+            object_key = item.get("object_key")
+            summary = item.get("summary")
+            description = item.get("description")
+
+            log.info(f"path: {path}")
+            uri = f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{{proxy}}"
+
+            self.get_or_create_spec_part(["paths", f"{path}/{{proxy+}}"], create=True)[
+                "get"
+            ] = {
+                "summary": summary,
+                "description": description,
+                "responses": {
+                    "200": {
+                        "description": "Successful response",
+                        "content": {"application/octet-stream": {}},
+                    }
+                },
+                "x-amazon-apigateway-integration": {
+                    "type": "aws",
+                    "uri": uri,
+                    "httpMethod": "GET",
+                    "passthroughBehavior": "when_no_match",
+                    "requestParameters": {
+                        "integration.request.path.proxy": "method.request.path.proxy",
+                    },
+                    "responses": {"default": {"statusCode": "200"}},
+                    "credentials": credentials_arn,
+                    "loggingLevel": "INFO",
+                    "dataTraceEnabled": True,
+                    "requestTemplates": {
+                        "application/json": {
+                            "statusCode": 200,
+                            "proxy": "$input.params('proxy')",
+                        }
+                    },
+                },
+            }
 
     def get_function_names(self) -> list[str]:
         """

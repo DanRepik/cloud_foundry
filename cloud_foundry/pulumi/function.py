@@ -122,7 +122,9 @@ class Function(pulumi.ComponentResource):
         log.info(f"policy_statements: {self.policy_statements}")
         for statement in self.policy_statements:
             log.info(f"statement: {statement}")
-            normalized_statement = {key.lower(): value for key, value in statement.items()}
+            normalized_statement = {
+                key.lower(): value for key, value in statement.items()
+            }
             if isinstance(statement, dict):
                 policy_statements.append(
                     aws.iam.GetPolicyDocumentStatementArgs(
