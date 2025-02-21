@@ -134,11 +134,15 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             path = item.get("path")
             bucket_name = item.get("bucket_name")
             object_key = item.get("object_key")
+            prefix = item.get("prefix", "")
             summary = item.get("summary")
             description = item.get("description")
 
             log.info(f"path: {path}")
-            uri = f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{{proxy}}"
+            if prefix:
+                uri = f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{prefix}/{{proxy}}"
+            else:
+                uri = f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{{proxy}}"
 
             self.get_or_create_spec_part(["paths", f"{path}/{{proxy+}}"], create=True)[
                 "get"
@@ -159,16 +163,17 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                     "requestParameters": {
                         "integration.request.path.proxy": "method.request.path.proxy",
                     },
-                    "responses": {"default": {"statusCode": "200"}},
+                    "responses": {
+                        "default": {
+                            "statusCode": "200",
+                            "responseParameters": {
+                                "method.response.header.Content-Type": "integration.response.header.Content-Type"
+                            },
+                        }
+                    },
                     "credentials": credentials_arn,
                     "loggingLevel": "INFO",
                     "dataTraceEnabled": True,
-                    "requestTemplates": {
-                        "application/json": {
-                            "statusCode": 200,
-                            "proxy": "$input.params('proxy')",
-                        }
-                    },
                 },
             }
 

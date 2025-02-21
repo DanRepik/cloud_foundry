@@ -5,4 +5,5 @@ from cloud_foundry.pulumi.rest_api import RestAPI, rest_api, RestAPIFirewall
 from cloud_foundry.utils.localstack import is_localstack_deployment
 
 from cloud_foundry.utils.openapi_editor import OpenAPISpecEditor
-from cloud_foundry.pulumi.site_bucket import SiteBucket
+from cloud_foundry.pulumi.site_bucket import site_bucket
+from cloud_foundry.pulumi.cdn import cdn
