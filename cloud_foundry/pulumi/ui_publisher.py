@@ -41,7 +41,7 @@ class UIPublisher(pulumi.ComponentResource):
             args (UIPublisherArgs): The arguments for the UIPublisher component.
             opts (ResourceOptions): Optional resource options.
         """
-        super().__init__("custom:resource:UIPublisher", args.name, {}, opts)
+        super().__init__("cloud_foundry:pulumi:UIPublisher", args.name, {}, opts)
 
         log.info(f"args: {args.__dict__}")
         self.bucket = bucket
@@ -86,14 +86,11 @@ class UIPublisher(pulumi.ComponentResource):
         """
         for item in self.remap_path_to_s3(dir, key):
             content_type, _ = guess_type(item["path"])
-            log.info(
-                f"Uploading {item['path']} to s3://{bucket.id}/{item['key']} with content type {content_type}"
-            )
             aws.s3.BucketObject(
                 item["key"],
                 bucket=bucket.id,
                 key=item["key"],
                 source=pulumi.FileAsset(item["path"]),
                 content_type=content_type,
-                opts=pulumi.ResourceOptions(parent=self),
+                opts=pulumi.ResourceOptions(parent=self, depends_on=[bucket]),
             )
