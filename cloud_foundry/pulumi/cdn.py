@@ -16,6 +16,7 @@ class CDNArgs:
         self,
         sites: Optional[List[dict]] = None,
         apis: Optional[List[dict]] = None,
+        create_apex: Optional[bool] = False,
         hosted_zone_id: Optional[str] = None,
         site_domain_name: Optional[str] = None,
         comment: Optional[str] = None,
@@ -24,6 +25,7 @@ class CDNArgs:
     ):
         self.sites = sites
         self.apis = apis
+        self.create_apex = create_apex
         self.hosted_zone_id = hosted_zone_id
         self.site_domain_name = site_domain_name
         self.comment = comment
@@ -38,37 +40,16 @@ class CDN(pulumi.ComponentResource):
         if not args.sites and not args.apis:
             raise ValueError("At least one site or api should be present")
 
-        hosted_zone_id = args.hosted_zone_id or self.find_hosted_zone_id(name)
-        domain_name = f"{pulumi.get_stack()}.{args.site_domain_name}"
+        self.hosted_zone_id = args.hosted_zone_id or self.find_hosted_zone_id(name)
+        self.domain_name = f"{pulumi.get_stack()}.{args.site_domain_name}"
 
-        # Request a certificate for the domain and its subdomains
-        certificate = aws.acm.Certificate(
-            f"{name}-cert",
-            domain_name=domain_name,
-            validation_method="DNS",
-            subject_alternative_names=[f"*.{domain_name}"],
-            opts=ResourceOptions(parent=self),
-        )
-
-        # Create DNS validation records
-        pulumi.Output.all(certificate.domain_validation_options).apply(
-            lambda domain_validation_options: [
-                aws.route53.Record(
-                    f"{validation_option['domain_name']}-validation",
-                    name=validation_option["resource_record_name"],
-                    type=validation_option["resource_record_type"],
-                    zone_id=hosted_zone_id,
-                    records=[validation_option["resource_record_value"]],
-                    ttl=60,
-                    opts=ResourceOptions(parent=self),
-                )
-                for domain_validation_option in domain_validation_options
-                for validation_option in domain_validation_option
-            ]
-        )
+        subject_alternative_names = [self.domain_name] if args.create_apex else []
 
         origins, caches, target_origin_id = self.get_origins(name, args)
+        log_bucket = self.set_up_log_bucket(name)
+        certificate = self.set_up_certificate(name)
 
+        log.info("starting distribution")
         self.distribution = aws.cloudfront.Distribution(
             f"{name}-distro",
             enabled=True,
@@ -76,27 +57,28 @@ class CDN(pulumi.ComponentResource):
             comment=args.comment,
             default_root_object=args.root_uri,
             logging_config=aws.cloudfront.DistributionLoggingConfigArgs(
-                bucket=self.set_up_log_bucket(name).bucket_domain_name,
+                bucket=log_bucket.bucket_domain_name,
                 include_cookies=False,
                 prefix="logs/",
             ),
-            aliases=[domain_name] if args.site_domain_name else None,
+            aliases=[self.domain_name] if args.site_domain_name else None,
             default_cache_behavior=aws.cloudfront.DistributionDefaultCacheBehaviorArgs(
+                target_origin_id=target_origin_id,
+                viewer_protocol_policy="redirect-to-https",
                 allowed_methods=["GET", "HEAD", "OPTIONS"],
                 cached_methods=["GET", "HEAD"],
-                target_origin_id=target_origin_id,
                 forwarded_values=aws.cloudfront.DistributionDefaultCacheBehaviorForwardedValuesArgs(
-                    query_string=False,
-                    headers=[],
+                    query_string=True,
                     cookies=aws.cloudfront.DistributionDefaultCacheBehaviorForwardedValuesCookiesArgs(
-                        forward="none"
-                    ),
+                        forward="all")
                 ),
                 compress=True,
-                viewer_protocol_policy="redirect-to-https",
-                min_ttl=1,
                 default_ttl=86400,
                 max_ttl=31536000,
+                min_ttl=1,
+                response_headers_policy_id=aws.cloudfront.get_response_headers_policy(
+                    name="Managed-SimpleCORS",
+                ).id,
             ),
             ordered_cache_behaviors=caches,
             price_class="PriceClass_100",
@@ -120,22 +102,26 @@ class CDN(pulumi.ComponentResource):
                     ],
                 )
             ),
-            viewer_certificate=aws.cloudfront.DistributionViewerCertificateArgs(
-                acm_certificate_arn=certificate.arn,
-                ssl_support_method="sni-only",
-                minimum_protocol_version="TLSv1.2_2021",
-            ),
+            viewer_certificate={
+                "acm_certificate_arn":certificate.arn,
+                "ssl_support_method":"sni-only",
+                "minimum_protocol_version": "TLSv1.2_2021",
+            },
             origins=origins,
-            opts=ResourceOptions(parent=self, depends_on=[certificate]),
+            opts=ResourceOptions(
+                parent=self, depends_on=[certificate, log_bucket], custom_timeouts={"delete": "30m"}
+            ),
         )
+        for site in self.site_origins:
+            site.create_policy(self.distribution.id)
 
-        if hosted_zone_id:
-            log.info(f"hosted_zone_id: {hosted_zone_id}")
+        if self.hosted_zone_id:
+            log.info(f"hosted_zone_id: {self.hosted_zone_id}")
             self.dns_alias = aws.route53.Record(
                 f"{name}-alias",
-                name=domain_name,
+                name=self.domain_name,
                 type="A",
-                zone_id=hosted_zone_id,
+                zone_id=self.hosted_zone_id,
                 aliases=[
                     aws.route53.RecordAliasArgs(
                         name=self.distribution.domain_name,
@@ -153,19 +139,21 @@ class CDN(pulumi.ComponentResource):
         target_origin_id = None
         origins = []
         caches = []
+        self.site_origins = []
 
         if args.sites:
             for site_args in args.sites:
                 site = SiteOrigin(f"{name}-{site_args.name}", site_args)
                 origins.append(site.distribution_origin)
+                self.site_origins.append(site)
                 if site_args.is_target_origin:
                     target_origin_id = site_args.origin_id
 
         if args.apis:
             for api in args.apis:
                 origin = aws.cloudfront.DistributionOriginArgs(
-                    domain_name=api["domain_name"],
-                    origin_id=api["origin_id"],
+                    domain_name=api.domain_name,
+                    origin_id=api.origin_id,
                     custom_origin_config=aws.cloudfront.DistributionOriginCustomOriginConfigArgs(
                         http_port=80,
                         https_port=443,
@@ -175,10 +163,10 @@ class CDN(pulumi.ComponentResource):
                 )
                 origins.append(origin)
                 cache_behavior = aws.cloudfront.DistributionOrderedCacheBehaviorArgs(
-                    path_pattern=api["path_pattern"],
+                    path_pattern=api.path_pattern,
                     allowed_methods=["GET", "HEAD", "OPTIONS"],
                     cached_methods=["GET", "HEAD"],
-                    target_origin_id=api["origin_id"],
+                    target_origin_id=api.origin_id,
                     forwarded_values=aws.cloudfront.DistributionOrderedCacheBehaviorForwardedValuesArgs(
                         query_string=True,
                         headers=["Authorization"],
@@ -199,8 +187,11 @@ class CDN(pulumi.ComponentResource):
         if target_origin_id is None:
             target_origin_id = origins[0].origin_id
 
+        log.info(f"target_origin_id: {target_origin_id}")
+        log.info(f"origins: {origins}")
+        log.info(f"caches: {caches}") 
         return origins, caches, target_origin_id
-
+    
     def set_up_log_bucket(self, name: str):
         log_bucket = aws.s3.Bucket(
             f"{name}-log",
@@ -210,7 +201,7 @@ class CDN(pulumi.ComponentResource):
         )
 
         ownership_controls = aws.s3.BucketOwnershipControls(
-            "example",
+            f"{name}-log-bucket-ownership-controls",
             bucket=log_bucket.id,
             rule={
                 "object_ownership": "BucketOwnerPreferred",
@@ -219,50 +210,44 @@ class CDN(pulumi.ComponentResource):
         )
 
         # Grant CloudFront write permissions to the bucket.
-        aws.s3.get_canonical_user_id_output
         aws.s3.BucketAclV2(
             f"{name}-log-bucket_acl",
             bucket=log_bucket.id,
-            access_control_policy={
-                "grants": [
-                    {
-                        "grantee": {
-                            "type": "CanonicalUser",
-                            "id": aws.cloudfront.get_log_delivery_canonical_user_id().id,
-                        },
-                        "permission": "WRITE",
-                    }
-                ],
-                "owner": {"id": aws.s3.get_canonical_user_id().id},
-            },
+            acl="log-delivery-write",
             opts=pulumi.ResourceOptions(parent=self, depends_on=[ownership_controls]),
         )
 
-        """
-
-        aws.s3.BucketPolicy(
-            f"{name}-log-bucket-policy",
-            bucket=log_bucket.id,
-            policy=log_bucket.arn.apply(
-                lambda arn: json.dumps(
-                    {
-                        "Version": "2012-10-17",
-                        "Statement": [
-                            {
-                                "Effect": "Allow",
-                                "Principal": {"Service": "cloudfront.amazonaws.com"},
-                                "Action": ["s3:PutObject", "s3:GetBucketAcl"],
-                                "Resource": f"{arn}/logs/*",
-                            }
-                        ],
-                    }
-                )
-            ),
+        return log_bucket
+    
+    def set_up_certificate(self, name):
+        certificate = aws.acm.Certificate(f"{name}-certificate", 
+            domain_name = self.domain_name,
+            validation_method = "DNS",
             opts=ResourceOptions(parent=self),
         )
 
-        """
-        return log_bucket
+        # Retrieve the DNS validation options
+        validationOptions = certificate.domain_validation_options.apply(lambda options: options[0])
+
+        # Create a Route 53 DNS record for validation
+        dnsRecord = aws.route53.Record(f"{name}-validation-record", 
+            name= validationOptions.resource_record_name,
+            zone_id= self.hosted_zone_id, 
+            type= validationOptions.resource_record_type,
+            records= [validationOptions.resource_record_value],
+            ttl= 60,
+            opts=ResourceOptions(parent=self),
+        )
+
+        # Validate the ACM certificate
+        certificateValidation = aws.acm.CertificateValidation(f"{name}-certificate-validation", 
+            certificate_arn= certificate.arn,
+            validation_record_fqdns= [dnsRecord.fqdn],
+            opts=ResourceOptions(parent=self),
+        )
+
+        return certificate
+
 
     def find_hosted_zone_id(self, name: str) -> str:
         # Implement your logic to find the hosted zone ID

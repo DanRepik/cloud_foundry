@@ -27,6 +27,7 @@ class SiteBucket(pulumi.ComponentResource):
             opts=ResourceOptions(parent=self),
         )
 
+        """
         # Bucket Ownership Controls
         bucket_ownership_controls = aws.s3.BucketOwnershipControls(
             f"{name}-ownership",
@@ -78,6 +79,7 @@ class SiteBucket(pulumi.ComponentResource):
             opts=ResourceOptions(parent=self),
         )
 
+        """
         # Handle publishers if any
         if args.publishers:
             for publisher in args.publishers:

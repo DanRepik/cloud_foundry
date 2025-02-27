@@ -15,7 +15,7 @@ class SiteOriginArgs:
         *,
         bucket,
         name: str,
-        origin_path: str = "",
+        origin_path: str = None,
         origin_shield_region: str = None,
         is_target_origin: bool = False,
     ):
@@ -39,67 +39,37 @@ class SiteOrigin(pulumi.ComponentResource):
     def __init__(self, name: str, args: SiteOriginArgs, opts: ResourceOptions = None):
         super().__init__("cloud_foundry:pulumi:SiteOrigin", name, {}, opts)
 
+        self.name = name
         # Determine the bucket type and extract the necessary
-        log.info(f"args.bucket: {args.bucket}")
         if isinstance(args.bucket, aws.s3.Bucket):
-            bucket_arn = args.bucket.arn
-            bucket_id = args.bucket.id
-            bucket_domain_name = args.bucket.bucket_regional_domain_name
+            self.bucket = args.bucket
         elif isinstance(args.bucket, SiteBucket):
-            bucket_arn = args.bucket.bucket.arn
-            bucket_id = args.bucket.bucket.id
-            bucket_domain_name = args.bucket.bucket.bucket_regional_domain_name
+            self.bucket = args.bucket.bucket
         else:
             raise ValueError(
                 "Invalid bucket type. Must be either aws.s3.Bucket or SiteBucket."
             )
 
-        # Used to grant CloudFront access to the S3 bucket
-        access_identity = aws.cloudfront.OriginAccessIdentity(
-            f"{name}-oai",
-            comment=f"Access Identity for {name}",
+        # Create Origin Access Control
+        origin_access_control = aws.cloudfront.OriginAccessControl(
+            f"{name}-origin-access-control",
+            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}",
+            origin_access_control_origin_type="s3",
+            signing_behavior="always",
+            signing_protocol="sigv4",
             opts=ResourceOptions(parent=self),
         )
 
-        # Policy document to allow access from another account and CloudFront Origin Access Identity (OAI)
-        allow_access_policy_document = pulumi.Output.all(
-            bucket_arn, access_identity.iam_arn
-        ).apply(
-            lambda args: {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Principal": {"Service": "delivery.logs.amazonaws.com"},
-                        "Action": "s3:PutObject",
-                        "Resource": f"{args[0]}/logs/*",
-                    },
-                    {
-                        "Effect": "Allow",
-                        "Principal": {"AWS": args[1]},
-                        "Action": "s3:GetObject",
-                        "Resource": f"{args[0]}/*",
-                    },
-                ],
-            }
-        )
-
-        # Attach the bucket policy to allow access from another account and CloudFront OAI
-        aws.s3.BucketPolicy(
-            f"{name}-origin-cf-policy",
-            bucket=bucket_id,
-            policy=allow_access_policy_document.apply(json.dumps),
-            opts=ResourceOptions(parent=self),
-        )
+        self.bucket.bucket_regional_domain_name.apply(lambda domain_name: log.info(f"bucket_regional_domain_name: {domain_name}"))
 
         self.distribution_origin = aws.cloudfront.DistributionOriginArgs(
-            domain_name=bucket_domain_name,
-            origin_id=f"{name}-{args.name}-site",
+            domain_name=self.bucket.bucket_regional_domain_name,
+            origin_id=f"S3-{pulumi.get_stack()}-root",
+            origin_access_control_id=origin_access_control.id,
             origin_path=args.origin_path,
             s3_origin_config=aws.cloudfront.DistributionOriginS3OriginConfigArgs(
-                origin_access_identity=access_identity.cloudfront_access_identity_path,
+                origin_access_identity=""
             ),
-            custom_headers=[],
         )
 
         if args.origin_shield_region:
@@ -109,4 +79,37 @@ class SiteOrigin(pulumi.ComponentResource):
                 )
             )
 
+        log.info(f"distribution_origin: {vars(self.distribution_origin)}")
         self.register_outputs({"distribution_origin": self.distribution_origin})
+
+    def create_distribution_origin(self):
+        return self.distribution_origin
+    
+    def create_policy(self, distiribution_id):
+        # Create S3 Bucket Policy
+        bucket_policy = aws.s3.BucketPolicy(
+            f"{self.name}-bucket-policy",
+            bucket=self.bucket.bucket,
+            policy=pulumi.Output.all(self.bucket.arn, distiribution_id, aws.get_caller_identity().account_id).apply(
+            lambda args: json.dumps(
+                {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "cloudfront.amazonaws.com"},
+                    "Action": "s3:GetObject",
+                    "Resource": f"{args[0]}/*",
+                    "Condition": {
+                        "StringEquals": {
+                        "AWS:SourceArn": f"arn:aws:cloudfront::{args[2]}:distribution/{args[1]}"
+                        }
+                    },
+                    }
+                ],
+                }
+            )
+            ),
+            opts=ResourceOptions(parent=self),
+        )
+
