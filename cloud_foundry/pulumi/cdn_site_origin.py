@@ -64,7 +64,7 @@ class SiteOrigin(pulumi.ComponentResource):
 
         self.distribution_origin = aws.cloudfront.DistributionOriginArgs(
             domain_name=self.bucket.bucket_regional_domain_name,
-            origin_id=f"S3-{pulumi.get_stack()}-root",
+            origin_id=f"{self.name}-site",
             origin_access_control_id=origin_access_control.id,
             origin_path=args.origin_path,
             s3_origin_config=aws.cloudfront.DistributionOriginS3OriginConfigArgs(

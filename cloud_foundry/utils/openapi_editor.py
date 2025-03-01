@@ -32,22 +32,23 @@ class OpenAPISpecEditor:
     def _merge_spec(self, spec: str):
         """Merge a single OpenAPI spec into the current one."""
         # Check if the string is a file path to a YAML file
+        log.info(f"Loading OpenAPI spec from: {spec}, is file: {os.path.isfile(spec)}")
         if os.path.isfile(spec) and (spec.endswith(".yaml") or spec.endswith(".yml")):
-            self.file_name = spec
-            new_spec_dict = self._load_openapi_spec()
+            new_spec_dict = self._load_openapi_spec(spec)
         else:
             # Assume the string is YAML content and parse it
             new_spec_dict = yaml.safe_load(spec)
 
+        log.info(f"Loaded OpenAPI spec: {new_spec_dict}")
         # Deep merge the new spec into the current spec
         self.openapi_spec = self._deep_merge(new_spec_dict, self.openapi_spec)
 
-    def _load_openapi_spec(self) -> Dict:
+    def _load_openapi_spec(self, file_name) -> Dict:
         """Load the OpenAPI spec from a YAML or JSON file."""
-        with open(self.file_name, "r") as file:
-            if self.file_name.endswith(".yaml") or self.file_name.endswith(".yml"):
+        with open(file_name, "r") as file:
+            if file_name.endswith(".yaml") or file_name.endswith(".yml"):
                 return yaml.safe_load(file)
-            elif self.file_name.endswith(".json"):
+            elif file_name.endswith(".json"):
                 return json.load(file)
             else:
                 raise ValueError("Unsupported file format. Use .json, .yaml, or .yml.")

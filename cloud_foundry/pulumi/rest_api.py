@@ -96,7 +96,9 @@ class RestAPI(pulumi.ComponentResource):
             return self.rest_api.id
 
         # Set up the output that will store the REST API ID
-        all_arns = integration_arns + token_validator_arns + [gateway_role.arn]
+        all_arns = integration_arns + token_validator_arns
+        if gateway_role:
+            all_arns.append(gateway_role.arn)
         all_function_names = integration_function_names + token_validator_function_names
         # Pulumi will resolve both ARNs and function names before proceeding to build the API
         self.rest_api_id = pulumi.Output.all(*all_arns, *all_function_names).apply(
@@ -251,6 +253,8 @@ class RestAPI(pulumi.ComponentResource):
         Args:
             bucket_names (list[str]): List of S3 bucket names that the API should access.
         """
+        if not self.content:
+            return
 
         def generate_s3_policy(buckets):
             log.info(f"buckets: {buckets}")
@@ -277,6 +281,7 @@ class RestAPI(pulumi.ComponentResource):
             item["bucket_name"] for item in self.content if "bucket_name" in item
         ]
         log.info(f"bucket_names: {bucket_names}")
+
         # Define policy allowing API Gateway access to the given S3 buckets
         s3_policy = aws.iam.Policy(
             f"{self.name}-s3-access-policy",
@@ -285,6 +290,7 @@ class RestAPI(pulumi.ComponentResource):
             policy=pulumi.Output.all(*bucket_names).apply(
                 lambda buckets: generate_s3_policy(buckets)
             ),
+            opts=pulumi.ResourceOptions(parent=self),
         )
 
         # Create IAM Role if it does not exist
@@ -303,6 +309,7 @@ class RestAPI(pulumi.ComponentResource):
                     ],
                 }
             ),
+            opts=pulumi.ResourceOptions(parent=self),
         )
 
         # Attach the policy to the role

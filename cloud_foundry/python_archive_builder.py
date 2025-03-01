@@ -133,10 +133,12 @@ class PythonArchiveBuilder(ArchiveBuilder):
         for destination, source in self._sources.items():
             destination_path = os.path.join(self._staging, destination)
             try:
+                log.info(f"Copying file {source} to {destination_path}")
                 if os.path.isdir(source):
                     shutil.copytree(source, destination_path)
                     log.info(f"Folder copied from {source} to {destination_path}")
                 elif os.path.isfile(source):
+                    log.info("is file")
                     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
                     shutil.copy2(source, destination_path)
                     log.info(f"File copied from {source} to {destination_path}")

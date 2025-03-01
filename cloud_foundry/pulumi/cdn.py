@@ -19,7 +19,6 @@ class CDNArgs:
         create_apex: Optional[bool] = False,
         hosted_zone_id: Optional[str] = None,
         site_domain_name: Optional[str] = None,
-        comment: Optional[str] = None,
         root_uri: Optional[str] = None,
         whitelist_countries: Optional[List[str]] = None,
     ):
@@ -28,7 +27,6 @@ class CDNArgs:
         self.create_apex = create_apex
         self.hosted_zone_id = hosted_zone_id
         self.site_domain_name = site_domain_name
-        self.comment = comment
         self.root_uri = root_uri
         self.whitelist_countries = whitelist_countries
 
@@ -52,9 +50,10 @@ class CDN(pulumi.ComponentResource):
         log.info("starting distribution")
         self.distribution = aws.cloudfront.Distribution(
             f"{name}-distro",
+            comment=f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}",
             enabled=True,
             is_ipv6_enabled=True,
-            comment=args.comment,
+#            comment=args.comment,
             default_root_object=args.root_uri,
             logging_config=aws.cloudfront.DistributionLoggingConfigArgs(
                 bucket=log_bucket.bucket_domain_name,
