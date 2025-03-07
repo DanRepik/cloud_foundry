@@ -1,22 +1,33 @@
 import pulumi
 import pulumi_aws as aws
+from typing import Union
 from pulumi import ResourceOptions
+from cloud_foundry.utils.logger import logger
+from cloud_foundry.pulumi.rest_api import RestAPI
+
+log = logger(__name__)
 
 
 class ApiOriginArgs:
     def __init__(
         self,
-        domain_name: str,
-        path_pattern: str,
-        origin_path: str = "",
+        rest_api: RestAPI = None,
+        name: str = None,
+        domain_name=None,
+        path_pattern: str = None,
+        origin_path: str = None,
         origin_shield_region: str = None,
         api_key_password: str = None,
+        is_target_origin: bool = False,
     ):
+        self.name = name
+        self.rest_api = rest_api
         self.domain_name = domain_name
         self.path_pattern = path_pattern
         self.origin_path = origin_path
         self.origin_shield_region = origin_shield_region
         self.api_key_password = api_key_password
+        self.is_target_origin = is_target_origin
 
 
 class ApiOrigin(pulumi.ComponentResource):
@@ -29,9 +40,11 @@ class ApiOrigin(pulumi.ComponentResource):
     """
 
     def __init__(self, name: str, args: ApiOriginArgs, opts: ResourceOptions = None):
-        super().__init__("custom:resource:ApiOrigin", name, {}, opts)
+        super().__init__(
+            "cloud_foudry:cdn:ApiOrigin", name or args.rest_api.name, {}, opts
+        )
 
-        self.origin_id = f"{name}-api"
+        self.origin_id = f"{name or args.rest_api.name}-api"
 
         pulumi.log.debug(f"origin_id: {self.origin_id}")
 
@@ -39,7 +52,7 @@ class ApiOrigin(pulumi.ComponentResource):
         if args.api_key_password:
             custom_headers.append({"name": "X-API-Key", "value": args.api_key_password})
 
-        self.origin = aws.cloudfront.DistributionOriginArgs(
+        self.distribution_origin = aws.cloudfront.DistributionOriginArgs(
             domain_name=args.domain_name,
             origin_id=self.origin_id,
             origin_path=args.origin_path,
@@ -51,9 +64,10 @@ class ApiOrigin(pulumi.ComponentResource):
             ),
             custom_headers=custom_headers,
         )
+        log.info(f"origin created")
 
         if args.origin_shield_region:
-            self.origin.origin_shield = (
+            self.distribution_origin.origin_shield = (
                 aws.cloudfront.DistributionOriginOriginShieldArgs(
                     enabled=True, origin_shield_region=args.origin_shield_region
                 )
@@ -72,21 +86,8 @@ class ApiOrigin(pulumi.ComponentResource):
             ],
             cached_methods=["GET", "HEAD"],
             target_origin_id=self.origin_id,
-            forwarded_values=aws.cloudfront.DistributionOrderedCacheBehaviorForwardedValuesArgs(
-                query_string=True,
-                headers=[
-                    "Authorization",
-                    "Sec-WebSocket-Key",
-                    "Sec-WebSocket-Version",
-                    "Sec-WebSocket-Protocol",
-                    "Sec-WebSocket-Accept",
-                    "Sec-WebSocket-Extensions",
-                    "Accept-Encoding",
-                ],
-                cookies=aws.cloudfront.DistributionOrderedCacheBehaviorForwardedValuesCookiesArgs(
-                    forward="none"
-                ),
-            ),
+            origin_request_policy_id="59781a5b-3903-41f3-afcb-af62929ccde1",
+            cache_policy_id="4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
             min_ttl=0,
             default_ttl=0,
             max_ttl=0,
@@ -95,5 +96,5 @@ class ApiOrigin(pulumi.ComponentResource):
         )
 
         self.register_outputs(
-            {"origin": self.origin, "cache_behavior": self.cache_behavior}
+            {"origin": self.distribution_origin, "cache_behavior": self.cache_behavior}
         )

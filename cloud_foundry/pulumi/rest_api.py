@@ -34,7 +34,7 @@ class RestAPI(pulumi.ComponentResource):
         name: str,
         body: Union[str, list[str]],
         integrations: list[dict] = None,
-        path_operations: list[dict] = None,
+        allow_origin: str = False,
         content: list[dict] = None,
         token_validators: list[dict] = None,
         firewall: Optional[RestAPIFirewall] = None,
@@ -61,6 +61,10 @@ class RestAPI(pulumi.ComponentResource):
         self.editor = AWSOpenAPISpecEditor(body)
         self.firewall = firewall
         self.logging = logging
+
+        log.info(f"allow_origin: {allow_origin}")
+        if allow_origin:
+            self.editor.enable_origin(allow_origin)
 
         # Collect all invoke ARNs and function names from integrations and token validators before proceeding
         integration_arns = [
@@ -169,7 +173,7 @@ class RestAPI(pulumi.ComponentResource):
                 opts=pulumi.ResourceOptions(parent=self),
                 access_log_settings={
                     "destinationArn": aws.cloudwatch.LogGroup(
-                        f"{self.name}-log-group",
+                        f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-log",
                         retention_in_days=7,
                         opts=pulumi.ResourceOptions(parent=self),
                     ).arn,
@@ -183,6 +187,7 @@ class RestAPI(pulumi.ComponentResource):
                             "httpMethod": "$context.httpMethod",
                             "resourcePath": "$context.resourcePath",
                             "status": "$context.status",
+                            "origin": "$context.request.header.origin",
                             "protocol": "$context.protocol",
                             "responseLength": "$context.responseLength",
                         }
@@ -214,7 +219,7 @@ class RestAPI(pulumi.ComponentResource):
 
         log.info("returning from build")
         return pulumi.Output.from_input(None)
-
+    
     def _create_lambda_permissions(self, function_names: list[str]):
         """
         Create permissions for each Lambda function so that API Gateway can invoke them.
@@ -321,14 +326,23 @@ class RestAPI(pulumi.ComponentResource):
 
         log.info(f"S3 access policy attached successfully. {api_gateway_role}")
         return api_gateway_role
+    
+    def get_endpoint(self):
+        host = (
+            "execute-api.localhost.localstack.cloud:4566"
+            if is_localstack_deployment()
+            else "execute-api.us-east-1.amazonaws.com"
+        )
+        return self.rest_api_id.apply(lambda api_id: f"{api_id}.{host}/{self.name}"),
+        
 
 
 def rest_api(
     name: str,
     body: Union[str, list[str]] = None,
     integrations: list[dict] = None,
+    allow_origin: str = False,
     token_validators: list[dict] = None,
-    path_operations: list[dict] = None,
     content: list[dict] = None,
     firewall: RestAPIFirewall = None,
     logging: Optional[bool] = False,
@@ -352,15 +366,8 @@ def rest_api(
 
     # Export the REST API ID and host as outputs
     pulumi.export(f"{name}-id", rest_api_instance.rest_api_id)
-    host = (
-        "execute-api.localhost.localstack.cloud:4566"
-        if is_localstack_deployment()
-        else "execute-api.us-east-1.amazonaws.com"
-    )
     pulumi.export(
-        f"{name}-host",
-        rest_api_instance.rest_api_id.apply(lambda api_id: f"{api_id}.{host}/{name}"),
-    )
+        f"{name}-host", rest_api_instance.get_endpoint())
 
     log.info("return rest_api")
     return rest_api_instance

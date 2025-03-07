@@ -258,3 +258,65 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
 
         # Update references in the entire OpenAPI spec
         update_refs(self.openapi_spec)
+
+    def enable_origin(self, allow_origin):
+        log.info(f"allow_origin: {allow_origin}")
+        paths = self.get_or_create_spec_part(["paths"], True)
+        for path in paths:
+            log.info(f"path: {path}")
+            paths[path][ 'options'] = {
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "responses": {
+                    '200': {
+                        "description": f"200 response",
+                        "schema": {
+                            "type": "object",
+                        },
+                        "headers": {
+                            "Access-Control-Allow-Origin": {
+                                "type": "string",
+                            },
+                            "Access-Control-Allow-Methods": {
+                                "type": "string",
+                            },
+                            "Access-Control-Allow-Headers": {
+                                "type": "string",
+                            },
+                        },
+                    },
+                },
+                "x-amazon-apigateway-integration": {
+                    "responses": {
+                        "default": {
+                            "statusCode": '200',
+                            "responseParameters": {
+                                "method.response.header.Access-Control-Allow-Methods": "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'",
+                                "method.response.header.Access-Control-Allow-Headers": "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'",
+                                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                            },
+                            "responseTemplates": {
+                                "application/json": "",
+                            },
+                        },
+                    },
+                    "requestTemplates": {
+                        "application/json": f'{{"statusCode": 200}}',
+                    },
+                    "passthroughBehavior": "when_no_match",
+                    "type": "mock",
+                },
+            }
+
+        self.get_or_create_spec_part([])["x-amazon-apigateway-cors"] = {
+            "allowOrigins": ["*"],
+            "allowCredentials": True,
+            "allowMethods": ["GET", "POST", "OPTIONS", "PUT", "PATCH", "DELETE"],
+            "allowHeaders": [
+                "Origin",
+                "X-Requested-With",
+                "Content-Type",
+                "Accept",
+                "Authorization",
+            ],
+        }
