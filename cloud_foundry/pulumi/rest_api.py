@@ -18,16 +18,12 @@ class RestAPI(pulumi.ComponentResource):
     A Pulumi component resource that creates and manages an AWS API Gateway REST API
     with Lambda integrations and token validators.
 
-    This class allows you to create a REST API, attach Lambda functions to path operations
-    (integrations), and associate token validators for authentication.
-
-    Attributes:
-        rest_api (Optional[aws.apigateway.RestApi]): The AWS API Gateway REST API resource.
-        rest_api_id (pulumi.Output[str]): The ID of the created REST API.
+    This class uses AWSOpenAPISpecEditor to process the OpenAPI spec by attaching
+    Lambda integrations, Cognito or Lambda token validators, and S3 content integrations.
     """
 
     rest_api: Optional[aws.apigateway.RestApi] = None
-    rest_api_id: pulumi.Output[str] = None  # Ensure rest_api_id is defined
+    rest_api_id: pulumi.Output[str] = None  # The REST API identifier
 
     def __init__(
         self,
@@ -47,13 +43,15 @@ class RestAPI(pulumi.ComponentResource):
         Args:
             name (str): The name of the REST API.
             body (Union[str, list[str]]): The OpenAPI specification for the API.
-                                          This can be a string or a list of strings (YAML or JSON).
-            integrations (list[dict], optional): A list of integrations that define the Lambda functions
-                                                 attached to path operations.
-            token_validators (list[dict], optional): A list of token validators that define authentication functions.
-            opts (pulumi.ResourceOptions, optional): Additional options for the resource.
+            integrations (list[dict], optional): List of integrations defining Lambda functions for path operations.
+            token_validators (list[dict], optional): List of token validators for authentication.
+            allow_origin (str, optional): If truthy, enables CORS in the API spec.
+            content (list[dict], optional): List of static content definitions (e.g. S3 integrations).
+            firewall (RestAPIFirewall, optional): Firewall configuration.
+            logging (bool, optional): Enable API Gateway stage logging.
+            opts (pulumi.ResourceOptions, optional): Additional resource options.
         """
-        super().__init__("cloudy_foundry:apigw:RestAPI", name, None, opts)
+        super().__init__("cloud_foundry:apigw:RestAPI", name, None, opts)
         self.name = name
         self.integrations = integrations or []
         self.token_validators = token_validators or []
@@ -66,83 +64,106 @@ class RestAPI(pulumi.ComponentResource):
         if allow_origin:
             self.editor.enable_origin(allow_origin)
 
-        # Collect all invoke ARNs and function names from integrations and token validators before proceeding
-        integration_arns = [
-            integration["function"].invoke_arn for integration in self.integrations
-        ]
-        integration_function_names = [
-            integration["function"].function_name for integration in self.integrations
-        ]
+        self.arn_slices = []
+        all_arns = []
+        for integration in self.integrations:
+            if "function" in integration:
+                self.arn_slices.append({
+                    "type": "integration",
+                    "path": integration["path"],
+                    "method": integration["method"],
+                    "length": 1,
+                    })
+                all_arns.append(integration["function"].invoke_arn)
+                all_arns.append(integration["function"].function_name)
 
-        token_validator_arns = [
-            validator["function"].invoke_arn for validator in self.token_validators
-        ]
-        token_validator_function_names = [
-            validator["function"].function_name for validator in self.token_validators
-        ]
+
+        for validator in self.token_validators:
+            log.info(f"Processing token validator: {validator}")
+            if "function" in validator:
+                self.arn_slices.append({
+                    "type": "token-validator",
+                    "name": validator["name"],
+                    "length": 1,
+                    })
+                all_arns.append(integration["function"].invoke_arn)
+                all_arns.append(validator["function"].function_name)
+            elif "user_pools" in validator:
+                self.arn_slices.append({
+                    "type": "pool-validator",
+                    "name": validator["name"],
+                    "length": len(validator["user_pools"]),
+                    })
+                for user_pool in validator["user_pools"]:
+                    all_arns.append(user_pool)
 
         gateway_role = self._get_gateway_role()
         log.info(f"gateway_role: {gateway_role}")
+        if gateway_role:
+            self.arn_slices.append({
+                    "type": "gateway-role",
+                    "length": 1,
+                    })
+            all_arns.append(gateway_role.arn)
+            all_arns.append(gateway_role.name)
 
-        # Wait for all invoke ARNs and function names to resolve and then build the API
-        def build_api(invoke_arns, function_names):
-            """
-            Build the API by processing the OpenAPI spec, adding integrations, and creating the REST API resource.
-
-            Args:
-                invoke_arns (list[str]): A list of Lambda function ARNs for integrations and token validators.
-                function_names (list[str]): A list of Lambda function names for integrations and token validators.
-
-            Returns:
-                pulumi.Output[str]: The REST API ID.
-            """
-            self._build(invoke_arns, function_names)
+        # Wait for all ARNs and function names to resolve, then build the API.
+        def build_api(invoke_arns):
+            self._build(invoke_arns)
             return self.rest_api.id
 
-        # Set up the output that will store the REST API ID
-        all_arns = integration_arns + token_validator_arns
-        if gateway_role:
-            all_arns.append(gateway_role.arn)
-        all_function_names = integration_function_names + token_validator_function_names
-        # Pulumi will resolve both ARNs and function names before proceeding to build the API
-        self.rest_api_id = pulumi.Output.all(*all_arns, *all_function_names).apply(
-            lambda arns_and_names: build_api(
-                arns_and_names[: len(all_arns)], arns_and_names[len(all_arns) :]
-            )
+        self.rest_api_id = pulumi.Output.all(*all_arns).apply(
+            lambda resolved_arns: build_api(resolved_arns)
         )
 
-    def _build(
-        self, invoke_arns: list[str], function_names: list[str]
-    ) -> pulumi.Output[None]:
-        """
-        Build the REST API and create the necessary integrations, token validators, and deployment.
+    def _build(self, invoke_arns: list[str]) -> pulumi.Output[None]:
+        log.info("Building REST API with AWSOpenAPISpecEditor")
 
-        Args:
-            invoke_arns (list[str]): The list of Lambda function ARNs.
-            function_names (list[str]): The list of Lambda function names.
+        index = 0
+        names = []
+        for arn_slice in self.arn_slices:
+            log.info(f"Processing ARN slice: {arn_slice}")
+            if arn_slice["type"] == "integration":
+                names.append(invoke_arns[index+1])
+                self.editor.add_integration(
+                    path=arn_slice["path"],
+                    method=arn_slice["method"],
+                    function_name=invoke_arns[index+1],
+                    invoke_arn=invoke_arns[index],
+                )
+                index += 2
+            elif arn_slice["type"] == "token-validator":
+                self.editor.add_token_validator(
+                    name=arn_slice["name"],
+                    function_name=invoke_arns[index+1],
+                    invoke_arn=invoke_arns[index],
+                )
+                index += 2
+            elif arn_slice["type"] == "pool-validator":
+                self.editor.add_user_pool_validator(
+                    name=arn_slice["name"],
+                    user_pool_arns=invoke_arns[index:index + arn_slice["length"]],
+                )
+                index += arn_slice["length"]
+            elif arn_slice["type"] == "gateway-role":
+                self.editor.process_gateway_role(
+                    self.content,
+                    invoke_arns[index],
+                    invoke_arns[index + 1],
+                )
+                index += 2
+            else:
+                raise ValueError(f"Unknown ARN slice type: {arn_slice['type']}")
 
-        Returns:
-            pulumi.Output[None]: Returns an empty output as the build process completes.
-        """
-        log.info(f"running build")
+        log.info(f"Names of functions: {names}")
+        # Process any S3 content integration using the last ARN (if gateway_role was provided).
+        if self.content:
+            self.editor.process_content(self.content, invoke_arns[-1])
 
-        # Process integrations and token validators using the provided ARNs and function names
-        self.editor.process_integrations(
-            self.integrations,
-            invoke_arns[: len(self.integrations)],
-            function_names[: len(self.integrations)],
-        )
-        self.editor.process_token_validators(
-            self.token_validators,
-            invoke_arns[len(self.integrations) :],
-            function_names[len(self.integrations) : -1],
-        )
-        self.editor.process_content(self.content, invoke_arns[-1])
-
-        # Write the updated OpenAPI spec to a file for logging or debugging
+        # Write the updated OpenAPI spec to a file for logging or debugging.
         write_logging_file(f"{self.name}.yaml", self.editor.to_yaml())
 
-        # Create the RestApi resource in AWS API Gateway
+        # Create the RestApi resource in AWS API Gateway.
         self.rest_api = aws.apigateway.RestApi(
             self.name,
             name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-rest-api",
@@ -150,21 +171,26 @@ class RestAPI(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        # Add permissions for API Gateway to invoke the Lambda functions
-        self._create_lambda_permissions(function_names)
+        # Add permissions so that API Gateway can invoke the Lambda functions.
+        self._create_lambda_permissions(names)
 
-        # Create the API Gateway deployment and stage
-        log.info("running build deployment")
+        # Create the API Gateway deployment.
+        log.info("Creating API Gateway deployment")
         deployment = aws.apigateway.Deployment(
             f"{self.name}-deployment",
             rest_api=self.rest_api.id,
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        log.info(f"running build stage")
+        # Create the API Gateway stage.
+        log.info("Creating API Gateway stage")
         if self.logging:
-            log.info("setting up logging")
-
+            log.info("Setting up logging for API stage")
+            log_group = aws.cloudwatch.LogGroup(
+                f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-log",
+                retention_in_days=7,
+                opts=pulumi.ResourceOptions(parent=self),
+            )
             stage = aws.apigateway.Stage(
                 f"{self.name}-stage",
                 rest_api=self.rest_api.id,
@@ -172,11 +198,7 @@ class RestAPI(pulumi.ComponentResource):
                 stage_name=self.name,
                 opts=pulumi.ResourceOptions(parent=self),
                 access_log_settings={
-                    "destinationArn": aws.cloudwatch.LogGroup(
-                        f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-log",
-                        retention_in_days=7,
-                        opts=pulumi.ResourceOptions(parent=self),
-                    ).arn,
+                    "destinationArn": log_group.arn,
                     "format": json.dumps(
                         {
                             "requestId": "$context.requestId",
@@ -195,7 +217,6 @@ class RestAPI(pulumi.ComponentResource):
                 },
             )
         else:
-            log.info(f"running build stage")
             stage = aws.apigateway.Stage(
                 f"{self.name}-stage",
                 rest_api=self.rest_api.id,
@@ -204,71 +225,55 @@ class RestAPI(pulumi.ComponentResource):
                 opts=pulumi.ResourceOptions(parent=self),
             )
 
+        # Optionally set up a firewall.
         if self.firewall:
-            log.info("setting up firewall")
+            log.info("Setting up firewall for API")
             waf = GatewayRestApiWAF(f"{self.name}-waf", self.firewall)
-            """
-            web_acl_association = aws.wafv2.WebAclAssociation(
-                f"{self.name}-waf-association",
-                resource_arn=stage.arn,
-                web_acl_arn=waf.arn)
-            """
+            # Uncomment the following lines to attach the WAF if desired:
+            # aws.wafv2.WebAclAssociation(
+            #     f"{self.name}-waf-association",
+            #     resource_arn=stage.arn,
+            #     web_acl_arn=waf.arn,
+            #     opts=pulumi.ResourceOptions(parent=self),
+            # )
 
-        # Register the output for the REST API ID
         self.register_outputs({"rest_api_id": self.rest_api.id})
-
-        log.info("returning from build")
+        log.info("REST API build completed")
         return pulumi.Output.from_input(None)
     
-    def _create_lambda_permissions(self, function_names: list[str]):
+    def _create_lambda_permissions(self, names: list[str]):
         """
-        Create permissions for each Lambda function so that API Gateway can invoke them.
-
-        Args:
-            function_names (list[str]): The list of Lambda function names to set permissions for.
+        Create Lambda permissions for each function so that API Gateway can invoke them.
         """
         permission_names = []
-        for function_name in function_names:
-            if function_name in permission_names:
+        for name in names:
+            if name in permission_names:
                 continue
-            log.info(f"Creating permission for function: {function_name}")
+            log.info(f"Creating permission for function: {name}")
             aws.lambda_.Permission(
-                f"{function_name}-lambda-permission",
+                f"{name}-lambda-permission",
                 action="lambda:InvokeFunction",
-                function=function_name,
+                function=name,
                 principal="apigateway.amazonaws.com",
                 source_arn=self.rest_api.execution_arn.apply(lambda arn: f"{arn}/*/*"),
                 opts=pulumi.ResourceOptions(parent=self),
             )
-            permission_names.append(function_name)
-
-    def _get_function_names_from_spec(self) -> list[str]:
-        """
-        Extract function names from the OpenAPI specification using OpenAPISpecEditor.
-
-        Returns:
-            list[str]: A list of function names found in the OpenAPI specification.
-        """
-        return self.editor.get_function_names()
+            permission_names.append(name)
 
     def _get_gateway_role(self):
         """
-        Grants API Gateway access to the specified S3 buckets.
-
-        Args:
-            bucket_names (list[str]): List of S3 bucket names that the API should access.
+        Create and return an IAM role that allows API Gateway to access S3 content
+        if content integrations are specified.
         """
         if not self.content:
-            return
+            return None
 
         def generate_s3_policy(buckets):
-            log.info(f"buckets: {buckets}")
+            log.info(f"Buckets for S3 policy: {buckets}")
             resources = []
             for bucket in buckets:
                 resources.append(f"arn:aws:s3:::{bucket}")
                 resources.append(f"arn:aws:s3:::{bucket}/*")
-            log.info(f"resources: {resources}")
-
             return json.dumps(
                 {
                     "Version": "2012-10-17",
@@ -282,49 +287,42 @@ class RestAPI(pulumi.ComponentResource):
                 }
             )
 
-        bucket_names = [
-            item["bucket_name"] for item in self.content if "bucket_name" in item
-        ]
-        log.info(f"bucket_names: {bucket_names}")
+        bucket_names = [item["bucket_name"] for item in self.content if "bucket_name" in item]
+        log.info(f"Bucket names: {bucket_names}")
 
-        # Define policy allowing API Gateway access to the given S3 buckets
+        # Create a policy to allow API Gateway access to the given S3 buckets.
         s3_policy = aws.iam.Policy(
             f"{self.name}-s3-access-policy",
             name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-s3-access-policy",
             description=f"Policy allowing API Gateway to access S3 buckets for {self.name}",
-            policy=pulumi.Output.all(*bucket_names).apply(
-                lambda buckets: generate_s3_policy(buckets)
-            ),
+            policy=pulumi.Output.all(*bucket_names).apply(lambda buckets: generate_s3_policy(buckets)),
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        # Create IAM Role if it does not exist
+        # Create an IAM role for API Gateway.
         api_gateway_role = aws.iam.Role(
             f"{self.name}-api-gw-role",
             name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-api-gw-role",
-            assume_role_policy=json.dumps(
-                {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": {"Service": "apigateway.amazonaws.com"},
-                            "Action": "sts:AssumeRole",
-                        }
-                    ],
-                }
-            ),
+            assume_role_policy=json.dumps({
+                "Version": "2012-10-17",
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Principal": {"Service": "apigateway.amazonaws.com"},
+                    "Action": "sts:AssumeRole"
+                }]
+            }),
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        # Attach the policy to the role
+        # Attach the S3 access policy to the role.
         aws.iam.RolePolicyAttachment(
             f"{self.name}-s3-access-attachment",
             policy_arn=s3_policy.arn,
             role=api_gateway_role.name,
+            opts=pulumi.ResourceOptions(parent=self),
         )
 
-        log.info(f"S3 access policy attached successfully. {api_gateway_role}")
+        log.info(f"S3 access policy attached successfully: {api_gateway_role}")
         return api_gateway_role
     
     def get_endpoint(self):
@@ -333,8 +331,7 @@ class RestAPI(pulumi.ComponentResource):
             if is_localstack_deployment()
             else "execute-api.us-east-1.amazonaws.com"
         )
-        return self.rest_api_id.apply(lambda api_id: f"{api_id}.{host}/{self.name}"),
-        
+        return self.rest_api_id.apply(lambda api_id: f"{api_id}.{host}/{self.name}")
 
 
 def rest_api(
@@ -352,22 +349,32 @@ def rest_api(
 
     Args:
         name (str): The name of the REST API.
-        body (str): The OpenAPI specification file path.
-        integrations (list[dict], optional): A list of integrations that define the Lambda functions
-                                             attached to path operations.
-        token_validators (list[dict], optional): A list of token validators that define authentication functions.
+        body (str or list[str]): The OpenAPI specification (as file path or content).
+        integrations (list[dict], optional): List of Lambda integrations.
+        token_validators (list[dict], optional): List of token validators.
+        allow_origin (str, optional): CORS setting.
+        content (list[dict], optional): S3 content integrations.
+        firewall (RestAPIFirewall, optional): Firewall configuration.
+        logging (bool, optional): Enable API stage logging.
 
     Returns:
         RestAPI: The created REST API component resource.
     """
-    log.info(f"rest_api name: {name}")
-    rest_api_instance = RestAPI(**vars())
-    log.info("built rest_api")
+    log.info(f"Creating REST API with name: {name}")
+    rest_api_instance = RestAPI(
+        name=name,
+        body=body,
+        integrations=integrations,
+        allow_origin=allow_origin,
+        token_validators=token_validators,
+        content=content,
+        firewall=firewall,
+        logging=logging,
+    )
+    log.info("REST API built successfully")
 
-    # Export the REST API ID and host as outputs
+    # Export REST API ID and host.
     pulumi.export(f"{name}-id", rest_api_instance.rest_api_id)
-    pulumi.export(
-        f"{name}-host", rest_api_instance.get_endpoint())
+    pulumi.export(f"{name}-host", rest_api_instance.get_endpoint())
 
-    log.info("return rest_api")
     return rest_api_instance

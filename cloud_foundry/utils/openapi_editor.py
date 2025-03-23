@@ -28,6 +28,7 @@ class OpenAPISpecEditor:
                 self._merge_spec(individual_spec)
         elif isinstance(spec, str):
             self._merge_spec(spec)
+        log.info(f"Initialized OpenAPISpecEditor with spec: {self.openapi_spec}")
 
     def _merge_spec(self, spec: str):
         """Merge a single OpenAPI spec into the current one."""

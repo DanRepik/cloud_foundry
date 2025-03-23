@@ -34,9 +34,19 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         )
 
     def add_token_validator(
-        self, name: str, function_name: str, authentication_invoke_arn: str
+        self,
+        name: str,
+        function_name: str,
+        invoke_arn: str,
     ):
-        # Use get_or_create_spec_part to ensure 'components' and 'securitySchemes' exist
+        """
+        Add a Lambda token validator to the OpenAPI spec.
+
+        Args:
+            name (str): The name for the token validator.
+            function_name (str): The name of the Lambda function to be used for validation.
+            authentication_invoke_arn (str): The ARN of the Lambda function.
+        """
         security_schemes = self.get_or_create_spec_part(
             ["components", "securitySchemes"], create=True
         )
@@ -49,34 +59,41 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             "x-amazon-apigateway-authtype": "custom",
             "x-amazon-apigateway-authorizer": {
                 "type": "token",
-                "authorizerUri": authentication_invoke_arn,
+                "authorizerUri": invoke_arn,
                 "identitySource": "method.request.header.Authorization",
                 "authorizerResultTtlInSeconds": 60,
             },
         }
 
-    def process_token_validators(
+    def add_user_pool_validator(
         self,
-        token_validators: list[dict],
-        invoke_arns: list[str],
-        function_names: list[str],
+        name: str,
+        user_pool_arns: List[str],
     ):
         """
-        Process and add each token validator to the OpenAPI spec using the resolved invoke_arns and function names.
+        Add a Cognito User Pool validator to the OpenAPI spec.
 
         Args:
-            token_validators (list[dict]): List of token validators defined in the configuration.
-            invoke_arns (list[str]): Resolved ARNs of the token validator functions.
-            function_names (list[str]): Resolved function names of the token validator functions.
+            name (str): The name for the token validator.
+            user_pools (List[str]): A list of Cognito User Pool ARNs.
         """
-        log.info(f"process token validators: {invoke_arns}")
-        for validator, invoke_arn, function_name in zip(
-            token_validators, invoke_arns, function_names
-        ):
-            log.info(f"add token validator: {validator['name']}")
-            self.add_token_validator(validator["name"], function_name, invoke_arn)
+        security_schemes = self.get_or_create_spec_part(
+            ["components", "securitySchemes"], create=True
+        )
 
-    def _add_integration(
+        security_schemes[name] = {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "x-amazon-apigateway-authorizer": {
+                "type": "cognito_user_pools",
+                "providerARNs": user_pool_arns,
+                "authorizerResultTtlInSeconds": 60,
+            },
+        }
+
+
+    def add_integration(
         self, path: str, method: str, function_name: str, invoke_arn: str
     ):
         """
