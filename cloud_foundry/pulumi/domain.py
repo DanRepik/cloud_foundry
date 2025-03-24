@@ -1,6 +1,7 @@
 import pulumi
 import pulumi_aws as aws
-from pulumi import ComponentResource, ResourceOptions 
+from pulumi import ComponentResource, ResourceOptions
+
 
 class Domain(ComponentResource):
     def __init__(self, name, domain_name, hosted_zone_id, records, opts=None):
@@ -49,11 +50,10 @@ class Domain(ComponentResource):
         )
 
 
-
 def domain(
     name: str,
     domain_name: str,
     hosted_zone_id: str,
     opts: ResourceOptions = None,
 ) -> Domain:
-    return Domain(name, domain_name, hosted_zone_id, opts)  
+    return Domain(name, domain_name, hosted_zone_id, opts)

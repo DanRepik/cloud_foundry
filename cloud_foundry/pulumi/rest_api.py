@@ -68,42 +68,49 @@ class RestAPI(pulumi.ComponentResource):
         all_arns = []
         for integration in self.integrations:
             if "function" in integration:
-                self.arn_slices.append({
-                    "type": "integration",
-                    "path": integration["path"],
-                    "method": integration["method"],
-                    "length": 1,
-                    })
+                self.arn_slices.append(
+                    {
+                        "type": "integration",
+                        "path": integration["path"],
+                        "method": integration["method"],
+                        "length": 1,
+                    }
+                )
                 all_arns.append(integration["function"].invoke_arn)
                 all_arns.append(integration["function"].function_name)
-
 
         for validator in self.token_validators:
             log.info(f"Processing token validator: {validator}")
             if "function" in validator:
-                self.arn_slices.append({
-                    "type": "token-validator",
-                    "name": validator["name"],
-                    "length": 1,
-                    })
+                self.arn_slices.append(
+                    {
+                        "type": "token-validator",
+                        "name": validator["name"],
+                        "length": 1,
+                    }
+                )
                 all_arns.append(integration["function"].invoke_arn)
                 all_arns.append(validator["function"].function_name)
             elif "user_pools" in validator:
-                self.arn_slices.append({
-                    "type": "pool-validator",
-                    "name": validator["name"],
-                    "length": len(validator["user_pools"]),
-                    })
+                self.arn_slices.append(
+                    {
+                        "type": "pool-validator",
+                        "name": validator["name"],
+                        "length": len(validator["user_pools"]),
+                    }
+                )
                 for user_pool in validator["user_pools"]:
                     all_arns.append(user_pool)
 
         gateway_role = self._get_gateway_role()
         log.info(f"gateway_role: {gateway_role}")
         if gateway_role:
-            self.arn_slices.append({
+            self.arn_slices.append(
+                {
                     "type": "gateway-role",
                     "length": 1,
-                    })
+                }
+            )
             all_arns.append(gateway_role.arn)
             all_arns.append(gateway_role.name)
 
@@ -124,25 +131,25 @@ class RestAPI(pulumi.ComponentResource):
         for arn_slice in self.arn_slices:
             log.info(f"Processing ARN slice: {arn_slice}")
             if arn_slice["type"] == "integration":
-                names.append(invoke_arns[index+1])
+                names.append(invoke_arns[index + 1])
                 self.editor.add_integration(
                     path=arn_slice["path"],
                     method=arn_slice["method"],
-                    function_name=invoke_arns[index+1],
+                    function_name=invoke_arns[index + 1],
                     invoke_arn=invoke_arns[index],
                 )
                 index += 2
             elif arn_slice["type"] == "token-validator":
                 self.editor.add_token_validator(
                     name=arn_slice["name"],
-                    function_name=invoke_arns[index+1],
+                    function_name=invoke_arns[index + 1],
                     invoke_arn=invoke_arns[index],
                 )
                 index += 2
             elif arn_slice["type"] == "pool-validator":
                 self.editor.add_user_pool_validator(
                     name=arn_slice["name"],
-                    user_pool_arns=invoke_arns[index:index + arn_slice["length"]],
+                    user_pool_arns=invoke_arns[index : index + arn_slice["length"]],
                 )
                 index += arn_slice["length"]
             elif arn_slice["type"] == "gateway-role":
@@ -240,7 +247,7 @@ class RestAPI(pulumi.ComponentResource):
         self.register_outputs({"rest_api_id": self.rest_api.id})
         log.info("REST API build completed")
         return pulumi.Output.from_input(None)
-    
+
     def _create_lambda_permissions(self, names: list[str]):
         """
         Create Lambda permissions for each function so that API Gateway can invoke them.
@@ -287,7 +294,9 @@ class RestAPI(pulumi.ComponentResource):
                 }
             )
 
-        bucket_names = [item["bucket_name"] for item in self.content if "bucket_name" in item]
+        bucket_names = [
+            item["bucket_name"] for item in self.content if "bucket_name" in item
+        ]
         log.info(f"Bucket names: {bucket_names}")
 
         # Create a policy to allow API Gateway access to the given S3 buckets.
@@ -295,7 +304,9 @@ class RestAPI(pulumi.ComponentResource):
             f"{self.name}-s3-access-policy",
             name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-s3-access-policy",
             description=f"Policy allowing API Gateway to access S3 buckets for {self.name}",
-            policy=pulumi.Output.all(*bucket_names).apply(lambda buckets: generate_s3_policy(buckets)),
+            policy=pulumi.Output.all(*bucket_names).apply(
+                lambda buckets: generate_s3_policy(buckets)
+            ),
             opts=pulumi.ResourceOptions(parent=self),
         )
 
@@ -303,14 +314,18 @@ class RestAPI(pulumi.ComponentResource):
         api_gateway_role = aws.iam.Role(
             f"{self.name}-api-gw-role",
             name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-api-gw-role",
-            assume_role_policy=json.dumps({
-                "Version": "2012-10-17",
-                "Statement": [{
-                    "Effect": "Allow",
-                    "Principal": {"Service": "apigateway.amazonaws.com"},
-                    "Action": "sts:AssumeRole"
-                }]
-            }),
+            assume_role_policy=json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"Service": "apigateway.amazonaws.com"},
+                            "Action": "sts:AssumeRole",
+                        }
+                    ],
+                }
+            ),
             opts=pulumi.ResourceOptions(parent=self),
         )
 
@@ -324,7 +339,7 @@ class RestAPI(pulumi.ComponentResource):
 
         log.info(f"S3 access policy attached successfully: {api_gateway_role}")
         return api_gateway_role
-    
+
     def get_endpoint(self):
         host = (
             "execute-api.localhost.localstack.cloud:4566"

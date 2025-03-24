@@ -92,7 +92,6 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             },
         }
 
-
     def add_integration(
         self, path: str, method: str, function_name: str, invoke_arn: str
     ):
@@ -281,11 +280,11 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         paths = self.get_or_create_spec_part(["paths"], True)
         for path in paths:
             log.info(f"path: {path}")
-            paths[path][ 'options'] = {
+            paths[path]["options"] = {
                 "consumes": ["application/json"],
                 "produces": ["application/json"],
                 "responses": {
-                    '200': {
+                    "200": {
                         "description": f"200 response",
                         "schema": {
                             "type": "object",
@@ -306,7 +305,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                 "x-amazon-apigateway-integration": {
                     "responses": {
                         "default": {
-                            "statusCode": '200',
+                            "statusCode": "200",
                             "responseParameters": {
                                 "method.response.header.Access-Control-Allow-Methods": "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'",
                                 "method.response.header.Access-Control-Allow-Headers": "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'",

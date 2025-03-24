@@ -21,7 +21,7 @@ def python_function(
     policy_statements: list[str] = [],
     environment: dict[str, str] = [],
     vpc_config: dict = None,
-    opts = None
+    opts=None,
 ) -> Function:
     archive_builder = PythonArchiveBuilder(
         name=f"{name}-archive-builder",
@@ -39,5 +39,5 @@ def python_function(
         environment=environment,
         policy_statements=policy_statements,
         vpc_config=vpc_config,
-        opts=opts
+        opts=opts,
     )
