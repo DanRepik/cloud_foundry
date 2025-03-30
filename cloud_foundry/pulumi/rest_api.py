@@ -73,11 +73,12 @@ class RestAPI(pulumi.ComponentResource):
                         "type": "integration",
                         "path": integration["path"],
                         "method": integration["method"],
-                        "length": 1,
+                        "length": 2,
                     }
                 )
-                all_arns.append(integration["function"].invoke_arn)
                 all_arns.append(integration["function"].function_name)
+                all_arns.append(integration["function"].invoke_arn)
+                log.info(f"Adding integration ARN slices, path: {integration['path']}")
 
         for validator in self.token_validators:
             log.info(f"Processing token validator: {validator}")
@@ -86,11 +87,13 @@ class RestAPI(pulumi.ComponentResource):
                     {
                         "type": "token-validator",
                         "name": validator["name"],
-                        "length": 1,
+                        "length": 2,
                     }
                 )
-                all_arns.append(integration["function"].invoke_arn)
                 all_arns.append(validator["function"].function_name)
+                all_arns.append(validator["function"].invoke_arn)
+                log.info(
+                    f"Adding token validator ARN slices, name: {validator['name']}, length: {len(all_arns)}")
             elif "user_pools" in validator:
                 self.arn_slices.append(
                     {
@@ -114,6 +117,9 @@ class RestAPI(pulumi.ComponentResource):
             all_arns.append(gateway_role.arn)
             all_arns.append(gateway_role.name)
 
+        log.info(f"ARN slices: {self.arn_slices}")
+        log.info(f"All ARNs: {len(all_arns)}")
+        # If content is provided, add it to the ARN slices.
         # Wait for all ARNs and function names to resolve, then build the API.
         def build_api(invoke_arns):
             self._build(invoke_arns)
@@ -126,41 +132,44 @@ class RestAPI(pulumi.ComponentResource):
     def _build(self, invoke_arns: list[str]) -> pulumi.Output[None]:
         log.info("Building REST API with AWSOpenAPISpecEditor")
 
+        log.info(f"Invoke ARNs: {len(invoke_arns)}")
+        for i in range(len(invoke_arns)):
+            log.info(f"Invoke ARN: {i} {invoke_arns[i]}")
         index = 0
         names = []
         for arn_slice in self.arn_slices:
             log.info(f"Processing ARN slice: {arn_slice}")
             if arn_slice["type"] == "integration":
-                names.append(invoke_arns[index + 1])
+                log.info(f"Adding integration: {arn_slice['path']}, index: {index}")
+                names.append(invoke_arns[index])
                 self.editor.add_integration(
                     path=arn_slice["path"],
                     method=arn_slice["method"],
-                    function_name=invoke_arns[index + 1],
-                    invoke_arn=invoke_arns[index],
+                    function_name=invoke_arns[index],
+                    invoke_arn=invoke_arns[index + 1],
                 )
-                index += 2
             elif arn_slice["type"] == "token-validator":
+                log.info(f"Adding token validator: {arn_slice['name']}, index: {index}")
+                names.append(invoke_arns[index])
                 self.editor.add_token_validator(
                     name=arn_slice["name"],
-                    function_name=invoke_arns[index + 1],
-                    invoke_arn=invoke_arns[index],
+                    function_name=invoke_arns[index],
+                    invoke_arn=invoke_arns[index +1],
                 )
-                index += 2
             elif arn_slice["type"] == "pool-validator":
                 self.editor.add_user_pool_validator(
                     name=arn_slice["name"],
                     user_pool_arns=invoke_arns[index : index + arn_slice["length"]],
                 )
-                index += arn_slice["length"]
             elif arn_slice["type"] == "gateway-role":
                 self.editor.process_gateway_role(
                     self.content,
                     invoke_arns[index],
                     invoke_arns[index + 1],
                 )
-                index += 2
             else:
                 raise ValueError(f"Unknown ARN slice type: {arn_slice['type']}")
+            index += arn_slice["length"]
 
         log.info(f"Names of functions: {names}")
         # Process any S3 content integration using the last ARN (if gateway_role was provided).
@@ -186,7 +195,7 @@ class RestAPI(pulumi.ComponentResource):
         deployment = aws.apigateway.Deployment(
             f"{self.name}-deployment",
             rest_api=self.rest_api.id,
-            opts=pulumi.ResourceOptions(parent=self),
+            opts=pulumi.ResourceOptions(parent=self, depends_on=[self.rest_api]),
         )
 
         # Create the API Gateway stage.
@@ -194,7 +203,8 @@ class RestAPI(pulumi.ComponentResource):
         if self.logging:
             log.info("Setting up logging for API stage")
             log_group = aws.cloudwatch.LogGroup(
-                f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-log",
+                f"{self.name}-log",
+                name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-log",
                 retention_in_days=7,
                 opts=pulumi.ResourceOptions(parent=self),
             )
@@ -203,7 +213,6 @@ class RestAPI(pulumi.ComponentResource):
                 rest_api=self.rest_api.id,
                 deployment=deployment.id,
                 stage_name=self.name,
-                opts=pulumi.ResourceOptions(parent=self),
                 access_log_settings={
                     "destinationArn": log_group.arn,
                     "format": json.dumps(
@@ -217,11 +226,16 @@ class RestAPI(pulumi.ComponentResource):
                             "resourcePath": "$context.resourcePath",
                             "status": "$context.status",
                             "origin": "$context.request.header.origin",
+                            "authorization": "$context.request.header.authorization",
                             "protocol": "$context.protocol",
                             "responseLength": "$context.responseLength",
                         }
                     ),
                 },
+                opts=pulumi.ResourceOptions(
+                    parent=self,
+                    depends_on=[deployment],
+                ),
             )
         else:
             stage = aws.apigateway.Stage(
@@ -229,7 +243,7 @@ class RestAPI(pulumi.ComponentResource):
                 rest_api=self.rest_api.id,
                 deployment=deployment.id,
                 stage_name=self.name,
-                opts=pulumi.ResourceOptions(parent=self),
+                opts=pulumi.ResourceOptions(parent=self, depends_on=[deployment]),
             )
 
         # Optionally set up a firewall.

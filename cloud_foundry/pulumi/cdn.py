@@ -19,6 +19,7 @@ class CDNArgs:
         create_apex: Optional[bool] = False,
         hosted_zone_id: Optional[str] = None,
         site_domain_name: Optional[str] = None,
+        error_responses: Optional[list] = None,
         root_uri: Optional[str] = None,
         whitelist_countries: Optional[List[str]] = None,
     ):
@@ -27,6 +28,7 @@ class CDNArgs:
         self.create_apex = create_apex
         self.hosted_zone_id = hosted_zone_id
         self.site_domain_name = site_domain_name
+        self.error_responses = error_responses
         self.root_uri = root_uri
         self.whitelist_countries = whitelist_countries
 
@@ -70,6 +72,7 @@ class CDN(pulumi.ComponentResource):
                     cookies=aws.cloudfront.DistributionDefaultCacheBehaviorForwardedValuesCookiesArgs(
                         forward="all"
                     ),
+                    headers=["Authorization"],
                 ),
                 compress=True,
                 default_ttl=86400,
@@ -107,6 +110,7 @@ class CDN(pulumi.ComponentResource):
                 "minimum_protocol_version": "TLSv1.2_2021",
             },
             origins=origins,
+            custom_error_responses=args.error_responses or [],
             opts=ResourceOptions(
                 parent=self,
                 depends_on=[certificate, validation, log_bucket],
@@ -301,6 +305,7 @@ def cdn(
     apis: list[dict],
     hosted_zone_id: Optional[str] = None,
     site_domain_name: Optional[str] = None,
+    error_responses: Optional[list] = None,
     root_uri: Optional[str] = None,
     opts: ResourceOptions = None,
 ) -> CDN:
@@ -321,6 +326,7 @@ def cdn(
             apis=api_origins,
             hosted_zone_id=hosted_zone_id,
             site_domain_name=site_domain_name,
+            error_responses=error_responses,
             root_uri=root_uri,
         ),
         opts,

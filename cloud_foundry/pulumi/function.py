@@ -50,6 +50,10 @@ class Function(pulumi.ComponentResource):
             self._create_lambda_function()
 
     @property
+    def arn(self) -> pulumi.Output[str]:
+        return self.lambda_.arn
+
+    @property
     def invoke_arn(self) -> pulumi.Output[str]:
         return self.lambda_.invoke_arn
 
@@ -70,6 +74,7 @@ class Function(pulumi.ComponentResource):
                 security_group_ids=self.vpc_config.get("security_group_ids", []),
             )
 
+        # Create the Lambda function
         self.lambda_ = aws.lambda_.Function(
             f"{self.name}-function",
             code=pulumi.FileArchive(self.archive_location),
@@ -84,12 +89,14 @@ class Function(pulumi.ComponentResource):
             vpc_config=vpc_config_args,  # Pass VPC config to Lambda
             opts=pulumi.ResourceOptions(depends_on=[execution_role], parent=self),
         )
+
+        # Export the Lambda function details
         pulumi.export(f"{self.name}-invoke-arn", self.lambda_.invoke_arn)
         pulumi.export(f"{self.name}-name", self._function_name)
         self.register_outputs(
             {
-                "invoke-arn": self.lambda_.invoke_arn,
-                "function_name": self._function_name,
+            "invoke_arn": self.lambda_.invoke_arn,
+            "function_name": self._function_name,
             }
         )
 

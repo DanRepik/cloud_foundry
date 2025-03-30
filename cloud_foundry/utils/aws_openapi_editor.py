@@ -85,6 +85,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             "type": "apiKey",
             "name": "Authorization",
             "in": "header",
+            "x-amazon-apigateway-authtype": "cognito_user_pools",
             "x-amazon-apigateway-authorizer": {
                 "type": "cognito_user_pools",
                 "providerARNs": user_pool_arns,
@@ -276,7 +277,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         update_refs(self.openapi_spec)
 
     def enable_origin(self, allow_origin):
-        log.info(f"allow_origin: {allow_origin}")
+        log.info(f"enable_origin: {allow_origin}")
         paths = self.get_or_create_spec_part(["paths"], True)
         for path in paths:
             log.info(f"path: {path}")
