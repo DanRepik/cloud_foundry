@@ -1,35 +1,28 @@
-# src/pyproject.tomal
+# src/pyproject.toml
 
 [build-system]
-requires = ["hatchling>=1.0"]
-build-backend = "hatchling.build"
+requires = ["flit-core>=3.2"]
+build-backend = "flit_core.buildapi"
 
 [project]
 name = "cloud-foundry"
-version = "0.0.22"
+version = "0.0.23"
 authors = [
-    { name="Daniel Repik", email="danrepik@icloud.com" },
+    { name = "Daniel Repik", email = "danrepik@icloud.com" }
 ]
-description = "cloud-foundry is a curated set of cloud components that can be used to assemble cloud based applications."
+description = "cloud-foundry is a curated set of cloud components that can be used to assemble cloud-based applications."
+readme = "README.md"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.9"
-classifiers = [
-    "Programming Language :: Python :: 3.9",
-    "Operating System :: OS Independent",
-]
 dependencies = [
     "pulumi",
     "pulumi-aws",
 ]
-
-[project.urls]
-"Documentation" = "https://github.com/DanRepik/cloud-foundry"
-"Source" = "https://github.com/DanRepik/cloud-foundry"
-
-[tool.hatch.build.targets.sdist]
-include = ["cloud_foundry"]
-
-[tool.hatch.build.targets.wheel]
-include = ["cloud_foundry"]
+classifiers = [
+    "Programming Language :: Python :: 3.9",
+    "Operating System :: OS Independent",
+]
+urls = { "Documentation" = "https://github.com/DanRepik/cloud-foundry", "Source" = "https://github.com/DanRepik/cloud-foundry" }
 
 [tool.pytest.ini_options]
 pythonpath = [".."]
