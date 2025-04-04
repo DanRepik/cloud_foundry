@@ -38,7 +38,7 @@ class Function(pulumi.ComponentResource):
         self.vpc_config = vpc_config or {}
         self._function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
 
-        # Check if we should import an existing Lambda function
+        # Import existing Lambda function if no creation parameters are provided
         if not archive_location and not hash and not runtime and not handler:
             log.info(f"Importing existing Lambda function: {self._function_name}")
             self.lambda_ = aws.lambda_.Function.get(
@@ -62,8 +62,9 @@ class Function(pulumi.ComponentResource):
         return self.lambda_.name
 
     def _create_lambda_function(self) -> aws.lambda_.Function:
-        log.debug("Creating lambda function")
+        log.info(f"Creating Lambda function: {self._function_name}")
 
+        # Create the execution role
         execution_role = self.create_execution_role()
 
         # Define VPC configuration if provided
@@ -86,22 +87,22 @@ class Function(pulumi.ComponentResource):
             source_code_hash=self.hash,
             runtime=self.runtime or aws.lambda_.Runtime.PYTHON3D9,
             environment=aws.lambda_.FunctionEnvironmentArgs(variables=self.environment),
-            vpc_config=vpc_config_args,  # Pass VPC config to Lambda
+            vpc_config=vpc_config_args,
             opts=pulumi.ResourceOptions(depends_on=[execution_role], parent=self),
         )
 
-        # Export the Lambda function details
-        pulumi.export(f"{self.name}-invoke-arn", self.lambda_.invoke_arn)
-        pulumi.export(f"{self.name}-name", self._function_name)
+        # Register outputs
         self.register_outputs(
             {
-            "invoke_arn": self.lambda_.invoke_arn,
-            "function_name": self._function_name,
+                "invoke_arn": self.lambda_.invoke_arn,
+                "function_name": self._function_name,
             }
         )
 
     def create_execution_role(self) -> aws.iam.Role:
-        log.debug("Creating execution role")
+        log.info(f"Creating execution role for Lambda function: {self._function_name}")
+
+        # Define the assume role policy
         assume_role_policy = aws.iam.get_policy_document(
             statements=[
                 aws.iam.GetPolicyDocumentStatementArgs(
@@ -117,7 +118,7 @@ class Function(pulumi.ComponentResource):
             ]
         )
 
-        log.info(f"Assume role policy: {assume_role_policy}")
+        # Create the IAM role
         role = aws.iam.Role(
             f"{self.name}-role",
             assume_role_policy=assume_role_policy.json,
@@ -125,25 +126,8 @@ class Function(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        policy_statements = []
-        log.info(f"policy_statements: {self.policy_statements}")
-        for statement in self.policy_statements:
-            normalized_statement = {
-                key.lower(): value for key, value in statement.items()
-            }
-            log.info(f"statement: {normalized_statement}")
-            if isinstance(statement, dict):
-                policy_statements.append(
-                    aws.iam.GetPolicyDocumentStatementArgs(
-                        effect=normalized_statement["effect"],
-                        actions=normalized_statement["actions"],
-                        resources=normalized_statement["resources"],
-                    )
-                )
-            else:
-                policy_statements.append(statement)
-
-        policy_statements.append(
+        # Build policy statements
+        policy_statements = [
             aws.iam.GetPolicyDocumentStatementArgs(
                 effect="Allow",
                 actions=[
@@ -153,41 +137,50 @@ class Function(pulumi.ComponentResource):
                 ],
                 resources=["*"],
             )
-        )
-        log.info(f"policy_statements: {policy_statements}")
+        ]
 
+        # Add user-defined policy statements
+        for statement in self.policy_statements:
+            if isinstance(statement, dict):
+                policy_statements.append(
+                    aws.iam.GetPolicyDocumentStatementArgs(
+                        effect=statement["Effect"],
+                        actions=statement["Actions"],
+                        resources=statement["Resources"],
+                    )
+                )
+
+        # Add VPC-related permissions if VPC config is provided
         if self.vpc_config:
-            policy_statements.append(
-                aws.iam.GetPolicyDocumentStatementArgs(
-                    effect="Allow",
-                    actions=[
-                        "ec2:CreateNetworkInterface",
-                        "ec2:DescribeNetworkInterfaces",
-                        "ec2:DeleteNetworkInterface",
-                        "ec2:AssignPrivateIpAddresses",
-                        "ec2:UnassignPrivateIpAddresses",
-                    ],
-                    resources=["*"],
-                )
-            )
-            policy_statements.append(
-                aws.iam.GetPolicyDocumentStatementArgs(
-                    effect="Allow",
-                    actions=[
-                        "ec2:DescribeSubnets",
-                        "ec2:DescribeSecurityGroups",
-                        "ec2:DescribeVpcEndpoints",
-                    ],
-                    resources=["*"],
-                )
+            policy_statements.extend(
+                [
+                    aws.iam.GetPolicyDocumentStatementArgs(
+                        effect="Allow",
+                        actions=[
+                            "ec2:CreateNetworkInterface",
+                            "ec2:DescribeNetworkInterfaces",
+                            "ec2:DeleteNetworkInterface",
+                            "ec2:AssignPrivateIpAddresses",
+                            "ec2:UnassignPrivateIpAddresses",
+                        ],
+                        resources=["*"],
+                    ),
+                    aws.iam.GetPolicyDocumentStatementArgs(
+                        effect="Allow",
+                        actions=[
+                            "ec2:DescribeSubnets",
+                            "ec2:DescribeSecurityGroups",
+                            "ec2:DescribeVpcEndpoints",
+                        ],
+                        resources=["*"],
+                    ),
+                ]
             )
 
-        for statement in policy_statements:
-            log.info(f"policy: {statement.resources}")
-
+        # Create the policy document
         policy_document = aws.iam.get_policy_document(statements=policy_statements)
 
-        log.info(f"Policy document: {policy_document.json}")
+        # Attach the policy to the role
         aws.iam.RolePolicy(
             f"{self.name}-role-policy",
             role=role.id,
@@ -212,10 +205,29 @@ def function(
     timeout: int = None,
     memory_size: int = None,
     environment: dict[str, str] = None,
-    actions: list[str] = None,
-    vpc_config: dict = None,  # New argument for VPC configuration
+    policy_statements: list = None,
+    vpc_config: dict = None,
     opts=None,
 ) -> Function:
+    """
+    Factory function to create a Lambda function.
+
+    Args:
+        name (str): The name of the Lambda function.
+        archive_location (str): The location of the Lambda function code archive.
+        hash (str): The source code hash for the Lambda function.
+        runtime (str): The runtime for the Lambda function (e.g., Python 3.9).
+        handler (str): The handler for the Lambda function.
+        timeout (int): The timeout for the Lambda function in seconds.
+        memory_size (int): The memory size for the Lambda function in MB.
+        environment (dict[str, str]): Environment variables for the Lambda function.
+        policy_statements (list): IAM policy statements for the Lambda function.
+        vpc_config (dict): VPC configuration for the Lambda function.
+        opts: Pulumi resource options.
+
+    Returns:
+        Function: A Pulumi-managed Lambda function.
+    """
     return Function(
         name,
         archive_location=archive_location,
@@ -225,7 +237,7 @@ def function(
         timeout=timeout,
         memory_size=memory_size,
         environment=environment,
-        actions=actions,
+        policy_statements=policy_statements,
         vpc_config=vpc_config,
         opts=opts,
     )

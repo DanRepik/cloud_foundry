@@ -51,7 +51,7 @@ snsTopic --> sqsQueue
 @enduml
 ```
 * **Distribution:**
-* * **CDB** - content delivery can be connected to multiple origins (Rest API, Site Bucket, Document Buckets, and WebSocket API).
+* * **CDN** - content delivery can be connected to multiple origins (Rest API, Site Bucket, Document Buckets, and WebSocket API).
 * **Origins:**
 Elements in this layer provide content, consists of backend resources like
 * * **Rest API**,
@@ -415,13 +415,11 @@ lambda_function = cloud_foundry.python_function(
 - [Pulumi AWS Lambda Function](https://www.pulumi.com/docs/reference/pkg/aws/lambda/function/)
 - [AWS Lambda Documentation](https://docs.aws.amazon.com/lambda/)
 
-# RestAPI (ComponentResource)
+## `rest_api` (Helper Function)
 
-The `RestAPI` class is a Pulumi component resource that allows you to create and manage an AWS API Gateway REST API with Lambda integrations and authorizers.
+The `rest_api` function simplifies the creation and management of an AWS API Gateway REST API with Lambda integrations and authorizers. It allows you to define your API using an OpenAPI specification and attach Lambda functions to specific path operations. Additionally, it supports Lambda authorizers for authentication and authorization.
 
-This component takes one or more OpenAPI specification and attaches Lambda functions to the API path operations as integrations. It also supports Lambda authorizers for authentication and authorization.
-
-## Example Usage
+### Example Usage
 
 ```python
 import pulumi
@@ -429,79 +427,146 @@ import cloud_foundry
 
 # Create the REST API
 greet_api = cloud_foundry.rest_api(
-    name="greet-api",
-    body="./api_spec.yaml",
-    integrations=[
-      {
-        "path": "/greet",
-        "method": "get",
-        "function": cloud_foundry.python_function(
-            name="greet-function",
-            handler="app.handler",
-            sources={"app.py": "./greet_app.py"},
-        ),
-      }
-    ],
-    authorizers=[
-      {
-        "name": "token-authorizer",
-        "type": "token",
-        "function": cloud_foundry.import_function("token-authorizer"),
-      }
-    ]
+  name="greet-api",
+  body="./api_spec.yaml",
+  integrations=[
+    {
+      "path": "/greet",
+      "method": "get",
+      "function": cloud_foundry.python_function(
+        name="greet-function",
+        handler="app.handler",
+        sources={"app.py": "./greet_app.py"},
+      ),
+    }
+  ],
+  authorizers=[
+    {
+      "name": "token-authorizer",
+      "type": "token",
+      "function": cloud_foundry.import_function("token-authorizer"),
+    }
+  ]
 )
 ```
 
-## Constructor
+### Function Signature
 
-### RestAPI(name, body, integrations=None, authorizers=None, opts=None)
-
-Creates a new `RestAPI` component.
+```python
+def rest_api(name, body, integrations=None, authorizers=None, opts=None)
+```
 
 ### Parameters
 
-- `name` (str) - The name of the REST API.
-- `body` (Union[str, list[str]]) - The OpenAPI specification file path or the content of the OpenAPI spec. This can be a string representing a file path or YAML content.
-- `integrations` (Optional[list[dict]]) - A list of Lambda function integrations for specific path operations in the API. Each integration is a dictionary containing:
+- `name` (str): The name of the REST API.
+- `body` (Union[str, list[str]]): The OpenAPI specification file path or the content of the OpenAPI spec. This can be a string representing a file path or YAML content.
+- `integrations` (Optional[list[dict]]): A list of Lambda function integrations for specific path operations in the API. Each integration is a dictionary containing:
   - `path` (str): The API path to integrate with the Lambda function.
   - `method` (str): The HTTP method for the path.
   - `function` (cloud_foundry.Function): The Lambda function to be integrated with the API path.
-- `authorizers` (Optional[list[dict]]) - A list of Lambda authorizers used for authentication in the API. Each authorizer is a dictionary containing:
+- `authorizers` (Optional[list[dict]]): A list of Lambda authorizers used for authentication in the API. Each authorizer is a dictionary containing:
   - `name` (str): The name of the authorizer.
   - `type` (str): The type of authorizer (e.g., `token`).
   - `function` (cloud_foundry.Function): The Lambda function used for the authorizer.
-- `opts` (Optional[pulumi.ResourceOptions]) - Options to control the resource's behavior.
-
-### Example
+- `opts` (Optional[pulumi.ResourceOptions]): Options to control the resource's behavior.
 
 ```python
-rest_api = RestAPI(
-    name="example-api",
-    body="./api_spec.yaml",
-    integrations=[
-        {
-            "path": "/hello",
-            "method": "get",
-            "function": cloud_foundry.python_function(
-                name="hello-function",
-                handler="app.handler",
-                sources={"app.py": "./hello_app.py"},
-            ),
-        }
-    ],
-    authorizers=[
-        {
-            "name": "oauth-authorizer",
-            "type": "token",
-            "function": cloud_foundry.import_function("oauth-authorizer"),
-        }
-    ]
+# define the OpenAPI specification for the application
+api_spec = """
+openapi: 3.0.3
+info:
+  description: A simple API that returns a greeting message.
+  title: Greeting API
+  version: 1.0.0
+paths:
+  /greet:
+    get:
+      summary: Returns a greeting message.
+      description: |
+        This endpoint returns a greeting message. It accepts an optional
+        query parameter `name`. If `name` is not provided, it defaults to "World".
+      parameters:
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: The name of the person to greet.
+          example: John
+         security:
+           - oauth_authorizer: []
+      responses:
+        200:
+          description: A greeting message.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    description: The greeting message.
+                    example: Hello, John!
+        400:
+          description: Bad Request - Invalid query parameter.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: A description of the error.
+                    example: Invalid query parameter
+"""
+
+rest_api = cloud_foundry.rest_api(
+  name="example-api",
+  body=api_spec,
+  integrations=[
+    {
+      "path": "/hello",
+      "method": "get",
+      "function": cloud_foundry.python_function(
+        name="hello-function",
+        handler="app.handler",
+        sources={"app.py": "./hello_app.py"},
+      ),
+    }
+  ],
+  authorizers=[
+    {
+      "name": "oauth-authorizer",
+      "type": "token",
+      "function": cloud_foundry.import_function("oauth-authorizer"),
+    }
+  ]
 )
 ```
 
-## Methods
-
-# rest_api (Helper Function)
+```python
+rest_api = cloud_foundry.rest_api(
+  name="example-api",
+  body="./api_spec.yaml",
+  integrations=[
+    {
+      "path": "/hello",
+      "method": "get",
+      "function": cloud_foundry.python_function(
+        name="hello-function",
+        handler="app.handler",
+        sources={"app.py": "./hello_app.py"},
+      ),
+    }
+  ],
+  authorizers=[
+    {
+      "name": "oauth-authorizer",
+      "type": "token",
+      "function": cloud_foundry.import_function("oauth-authorizer"),
+    }
+  ]
+)
+```
 
 The `rest_api` function simplifies the creation of an API Gateway REST API by using the `RestAPI` component. It also automatically exports the API Gateway host and API ID.
 
@@ -563,3 +628,325 @@ greet_api = rest_api(
 
 - `name-id` (str) - The ID of the created API Gateway REST API.
 - `name-host` (str) - The host URL of the created API Gateway REST API.
+
+# `document_repository` Function Documentation
+The `document_repository` function is a utility designed to create a centralized document repository. It enables clients and services to store, retrieve, and manage documents efficiently within an S3 bucket.
+
+This repository simplifies handling document-related operations by providing optional event notifications that can trigger Lambda functions or workflows. The function streamlines the setup process by creating the S3 bucket, configuring Lambda triggers, and managing the required IAM permissions.
+
+## Function Signature
+
+```python
+def document_repository(name, bucket_name: str = None, notifications=None, opts=None):
+    return DocumentRepository(name, bucket_name, notifications, opts)
+```
+
+---
+
+## Parameters
+
+1. **`name`** (str, required):
+   - The name of the document repository.
+   - This name is used to create the S3 bucket and associated resources.
+
+2. **`bucket_name`** (str, optional):
+   - The name of the S3 bucket to be created.
+   - If not provided, a default name is generated using the format: `<project>-<stack>-<name>`.
+
+3. **`notifications`** (list of dict, optional):
+   - A list of notification configurations for Lambda triggers.
+   - Each notification is a dictionary with the following keys:
+     - **`function`** (required): The Lambda function to trigger.
+     - **`prefix`** (optional): A prefix filter for the S3 object key (e.g., `"uploads/"`).
+     - **`suffix`** (optional): A suffix filter for the S3 object key (e.g., `".jpg"`).
+
+4. **`opts`** (pulumi.ResourceOptions, optional):
+   - Additional options for the Pulumi resource, such as parent-child relationships or custom dependencies.
+
+---
+
+## Returns
+
+- An instance of the `DocumentRepository` class, which includes:
+  - The created S3 bucket.
+  - Configured Lambda notifications (if provided).
+  - IAM role and permissions for the Lambda functions.
+
+---
+
+## Features
+
+1. **S3 Bucket Creation**:
+   - Creates an S3 bucket with the specified or default name.
+
+2. **Lambda Notifications**:
+   - Configures S3 bucket notifications to trigger Lambda functions on specific events (e.g., object creation or deletion).
+   - Supports prefix and suffix filters for fine-grained control over which objects trigger the Lambda function.
+
+3. **IAM Role Management**:
+   - Automatically creates an IAM role for the Lambda function with the necessary permissions.
+
+4. **Pulumi Integration**:
+   - Fully integrated with Pulumi, allowing for seamless infrastructure as code (IaC) management.
+
+---
+
+## Example Usage
+
+### Basic S3 Bucket Creation
+
+```python
+from cloud_foundry.pulumi.document_repository import document_repository
+
+# Create a simple S3 bucket
+bucket = document_repository(name="my-doc-repo")
+```
+
+### S3 Bucket with Lambda Notifications
+
+```python
+from cloud_foundry.pulumi.document_repository import document_repository
+from pulumi_aws import lambda_
+
+# Define a Lambda function
+my_lambda = lambda_.Function(
+    "my-lambda",
+    runtime="python3.9",
+    handler="handler.main",
+    code=pulumi.AssetArchive({
+        ".": pulumi.FileArchive("./lambda_code"),
+    }),
+)
+
+# Create an S3 bucket with Lambda notifications
+bucket = document_repository(
+    name="my-doc-repo",
+    notifications=[
+        {
+            "function": my_lambda,
+            "prefix": "uploads/",
+            "suffix": ".jpg",
+        }
+    ],
+)
+```
+
+### Custom Bucket Name
+
+```python
+bucket = document_repository(
+    name="my-doc-repo",
+    bucket_name="custom-bucket-name",
+)
+```
+
+---
+
+## Generated Resources
+
+1. **S3 Bucket**:
+   - A new S3 bucket is created with the specified or default name.
+
+2. **Bucket Notifications**:
+   - Configures S3 bucket notifications to trigger Lambda functions on specified events.
+
+3. **IAM Role**:
+   - An IAM role is created for the Lambda function with the necessary permissions.
+
+4. **Lambda Permissions**:
+   - Grants the S3 bucket permission to invoke the Lambda function.
+
+---
+
+## Best Practices
+
+1. **Use Prefix and Suffix Filters**:
+   - Use `prefix` and `suffix` filters to limit the objects that trigger the Lambda function, reducing unnecessary invocations.
+
+2. **Secure IAM Roles**:
+   - Ensure that the IAM role created for the Lambda function has only the necessary permissions.
+
+3. **Test Lambda Functions**:
+   - Test the Lambda functions independently before attaching them to the S3 bucket to ensure they handle events correctly.
+
+---
+
+## Limitations
+
+1. **Single Bucket**:
+   - This function creates a single S3 bucket. For multiple buckets, you need to call the function multiple times.
+
+2. **Notification Configuration**:
+   - Notifications are limited to the events and filters supported by S3.
+
+---
+
+## Conclusion
+
+The `document_repository` function simplifies the creation of an S3 bucket with optional Lambda notifications and IAM role management. It is a powerful tool for managing document repositories in AWS using Pulumi.
+
+
+
+### **`cdn` Function Documentation**
+
+The `cdn` function is a utility for creating a Content Delivery Network (CDN) using AWS CloudFront, Route 53, and ACM (AWS Certificate Manager). It simplifies the process of deploying a CDN for serving static websites, APIs, and other content with custom domains, SSL/TLS certificates, and advanced caching and logging features.
+
+---
+
+#### **Function Signature**
+
+```python
+def cdn(name: str, sites=None, apis=None, hosted_zone_id=None, site_domain_name=None, create_apex=False, root_uri=None, error_responses=None, whitelist_countries=None):
+    return CDN(name, CDNArgs(sites, apis, hosted_zone_id, site_domain_name, create_apex, root_uri, error_responses, whitelist_countries))
+```
+
+---
+
+#### **Parameters**
+
+1. **`name`** (str, required):
+   - The name of the CDN resource.
+   - Used to name the CloudFront distribution, Route 53 records, and other associated resources.
+
+2. **`sites`** (list, optional):
+   - A list of static site configurations to be served by the CDN.
+   - Each site is defined as a dictionary with properties like `name` and `is_target_origin`.
+
+3. **`apis`** (list, optional):
+   - A list of API configurations to be served by the CDN.
+   - Each API is defined as a dictionary with properties like `name` and `rest_api`.
+
+4. **`hosted_zone_id`** (str, optional):
+   - The Route 53 hosted zone ID for managing DNS records.
+
+5. **`site_domain_name`** (str, optional):
+   - The domain name for the site (e.g., `example.com` or `www.example.com`).
+
+6. **`create_apex`** (bool, optional):
+   - Whether to create an apex domain (e.g., `example.com`).
+   - Defaults to `False`.
+
+7. **`root_uri`** (str, optional):
+   - The default root object for the CDN (e.g., index.html).
+
+8. **`error_responses`** (list, optional):
+   - Custom error responses for the CloudFront distribution.
+
+9. **`whitelist_countries`** (list, optional):
+   - A list of countries allowed to access the CDN.
+
+---
+
+#### **Returns**
+
+- An instance of the `CDN` class, which includes:
+  - The created CloudFront distribution.
+  - Configured Route 53 DNS records.
+  - ACM certificates for HTTPS.
+  - S3 bucket for logging (if enabled).
+
+---
+
+#### **Features**
+
+1. **CloudFront Distribution**:
+   - Configures a CloudFront distribution to serve content from S3 buckets or APIs.
+   - Supports custom caching, geo-restrictions, and error responses.
+
+2. **Custom Domains**:
+   - Configures Route 53 DNS records and ACM certificates for custom domains (e.g., `example.com` and `www.example.com`).
+
+3. **SSL/TLS Certificates**:
+   - Automatically provisions ACM certificates for HTTPS.
+
+4. **Logging**:
+   - Creates an S3 bucket for storing CloudFront logs.
+
+5. **Multi-Origin Support**:
+   - Supports multiple origins, including static sites and APIs.
+
+6. **Geo-Restrictions**:
+   - Restricts access to specific countries.
+
+---
+
+#### **Example Usage**
+
+##### **Basic CDN Setup**
+
+```python
+from cloud_foundry.pulumi.cdn import cdn
+
+cdn_instance = cdn(
+    name="my-cdn",
+    sites=[
+        {"name": "static-site", "is_target_origin": True},
+    ],
+    apis=[
+        {"name": "my-api", "rest_api": my_api_gateway},
+    ],
+    hosted_zone_id="Z1234567890ABC",
+    site_domain_name="example.com",
+    create_apex=True,
+    root_uri="index.html",
+)
+```
+
+##### **CDN for Static Sites Only**
+
+```python
+cdn_instance = cdn(
+    name="static-cdn",
+    sites=[
+        {"name": "static-site", "is_target_origin": True},
+    ],
+    hosted_zone_id="Z1234567890ABC",
+    site_domain_name="static.example.com",
+)
+```
+
+##### **CDN with Geo-Restrictions**
+
+```python
+cdn_instance = cdn(
+    name="geo-restricted-cdn",
+    sites=[
+        {"name": "restricted-site", "is_target_origin": True},
+    ],
+    hosted_zone_id="Z1234567890ABC",
+    site_domain_name="restricted.example.com",
+    whitelist_countries=["US", "CA", "GB"],
+)
+```
+
+---
+
+#### **Best Practices**
+
+1. **Use Custom Domains**:
+   - Configure `site_domain_name` and `hosted_zone_id` to serve content with custom domains.
+
+2. **Enable Logging**:
+   - Use the logging bucket to monitor and debug CDN traffic.
+
+3. **Optimize Caching**:
+   - Configure caching behaviors to improve performance and reduce costs.
+
+4. **Restrict Access**:
+   - Use `whitelist_countries` to restrict access to specific regions.
+
+---
+
+#### **Limitations**
+
+1. **Single Hosted Zone**:
+   - The implementation assumes all domains are managed within a single Route 53 hosted zone.
+
+2. **Static and API Origins**:
+   - Supports static sites and APIs as origins but does not include advanced origin failover configurations.
+
+---
+
+#### **Conclusion**
+
+The `cdn` function simplifies the deployment of a Content Delivery Network using AWS CloudFront, Route 53, and ACM. It supports static sites, APIs, custom domains, and advanced features like logging and geo-restrictions. This function is ideal for building scalable, secure, and performant web applications.

@@ -1,7 +1,6 @@
 # aws_openapi_editor.py
 
 import pulumi_aws as aws
-import json
 import re
 from typing import Union, Dict, List, Optional
 from cloud_foundry.utils.logger import logger
@@ -11,13 +10,18 @@ log = logger(__name__)
 
 
 class AWSOpenAPISpecEditor(OpenAPISpecEditor):
+    """
+    A specialized OpenAPI specification editor for AWS API Gateway.
+    Provides utilities for managing integrations, CORS, schema corrections, and path operations.
+    """
+
     def __init__(self, spec: Optional[Union[Dict, str, List[str]]]):
         """
         Initialize the class by loading the OpenAPI specification.
 
         Args:
-            spec (Union[Dict, str]): A dictionary containing the OpenAPI specification
-                                     or a string representing YAML content or a file path.
+            spec (Union[Dict, str, List[str]]): A dictionary containing the OpenAPI specification,
+                                                a string representing YAML content, or a file path.
         """
         super().__init__(
             spec
@@ -33,19 +37,14 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             }
         )
 
-    def add_token_validator(
-        self,
-        name: str,
-        function_name: str,
-        invoke_arn: str,
-    ):
+    def add_token_validator(self, name: str, function_name: str, invoke_arn: str):
         """
         Add a Lambda token validator to the OpenAPI spec.
 
         Args:
             name (str): The name for the token validator.
             function_name (str): The name of the Lambda function to be used for validation.
-            authentication_invoke_arn (str): The ARN of the Lambda function.
+            invoke_arn (str): The ARN of the Lambda function.
         """
         security_schemes = self.get_or_create_spec_part(
             ["components", "securitySchemes"], create=True
@@ -65,17 +64,13 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             },
         }
 
-    def add_user_pool_validator(
-        self,
-        name: str,
-        user_pool_arns: List[str],
-    ):
+    def add_user_pool_validator(self, name: str, user_pool_arns: List[str]):
         """
         Add a Cognito User Pool validator to the OpenAPI spec.
 
         Args:
             name (str): The name for the token validator.
-            user_pools (List[str]): A list of Cognito User Pool ARNs.
+            user_pool_arns (List[str]): A list of Cognito User Pool ARNs.
         """
         security_schemes = self.get_or_create_spec_part(
             ["components", "securitySchemes"], create=True
@@ -98,6 +93,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
     ):
         """
         Add an integration to a specific path and method in the OpenAPI spec.
+        If the integration already exists, replace it with the new one.
 
         Args:
             path (str): The API path (e.g., "/token").
@@ -105,22 +101,19 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             function_name (str): The name of the Lambda function.
             invoke_arn (str): The ARN of the Lambda function to integrate with.
         """
-        self.add_operation_attribute(
-            path=path,
-            method=method,
-            attribute="x-function-name",
-            value=function_name,
-        )
-        self.add_operation_attribute(
-            path=path,
-            method=method,
-            attribute="x-amazon-apigateway-integration",
-            value={
-                "type": "aws_proxy",
-                "uri": invoke_arn,
-                "httpMethod": "POST",
-            },
-        )
+        operation = self.get_or_create_spec_part(["paths", path, method], create=True)
+        if not operation:
+            log.warning(
+                f"Operation for path '{path}' and method '{method}' does not exist."
+            )
+            return
+
+        operation["x-function-name"] = function_name
+        operation["x-amazon-apigateway-integration"] = {
+            "type": "aws_proxy",
+            "uri": invoke_arn,
+            "httpMethod": "POST",
+        }
 
     def process_integrations(
         self,
@@ -129,7 +122,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         function_names: list[str],
     ):
         """
-        Process and add each integration to the OpenAPI spec using the resolved invoke_arns and function names.
+        Process and add each integration to the OpenAPI spec using the resolved invoke ARNs and function names.
 
         Args:
             integrations (list[dict]): List of integrations defined in the configuration.
@@ -139,27 +132,30 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         for integration, invoke_arn, function_name in zip(
             integrations, invoke_arns, function_names
         ):
-            self._add_integration(
-                integration["path"],
-                integration["method"],
-                function_name,
-                invoke_arn,
+            self.add_integration(
+                integration["path"], integration["method"], function_name, invoke_arn
             )
 
     def process_content(self, content: list[dict], credentials_arn: str):
+        """
+        Process and add S3 content integrations to the OpenAPI spec.
+
+        Args:
+            content (list[dict]): List of content configurations.
+            credentials_arn (str): The ARN of the IAM role for accessing S3.
+        """
         for item in content:
             path = item.get("path")
             bucket_name = item.get("bucket_name")
-            object_key = item.get("object_key")
             prefix = item.get("prefix", "")
             summary = item.get("summary")
             description = item.get("description")
 
-            log.info(f"path: {path}")
-            if prefix:
-                uri = f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{prefix}/{{proxy}}"
-            else:
-                uri = f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{{proxy}}"
+            uri = (
+                f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{prefix}/{{proxy}}"
+                if prefix
+                else f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{{proxy}}"
+            )
 
             self.get_or_create_spec_part(["paths", f"{path}/{{proxy+}}"], create=True)[
                 "get"
@@ -189,75 +185,28 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                         }
                     },
                     "credentials": credentials_arn,
-                    "loggingLevel": "INFO",
-                    "dataTraceEnabled": True,
                 },
             }
-
-    def get_function_names(self) -> list[str]:
-        """
-        Return a list of all 'x-function-name' attributes in the OpenAPI spec.
-
-        Returns:
-            List[str]: A list of function names found in the OpenAPI spec.
-        """
-        function_names = []
-        paths = self.get_spec_part(["paths"])
-        log.info(f"path: {paths}")
-
-        if paths:
-            for _, methods in paths.items():
-                for _, operation in methods.items():
-                    function_name = operation.get("x-function-name")
-                    if function_name:
-                        function_names.append(function_name)
-
-        security_schemes = self.get_spec_part(["components", "securitySchemes"])
-        log.info(f"security: {security_schemes}")
-        if security_schemes:
-            for _, scheme in security_schemes.items():
-                function_name = scheme.get("x-function-name")
-                if function_name:
-                    function_names.append(function_name)
-
-        log.info(f"function_names: {function_names}")
-
-        return function_names
 
     def correct_schema_names(self):
         """
         Correct schema component names to strictly alphabetic characters and update all references accordingly.
-
-        This function renames any schema components that have non-alphabetic characters and ensures all $ref
-        references in the OpenAPI specification are updated to match the renamed components.
-
-        Returns:
-            None
         """
-        # Regex pattern to match non-alphabetic characters
         non_alphabetic_pattern = re.compile(r"[^a-zA-Z]")
-
         schemas = self.get_spec_part(["components", "schemas"], create=False)
         if not schemas:
-            log.warning("No schemas found in the OpenAPI spec.")
             return
 
-        # Map old schema names to new schema names (strictly alphabetic)
         renamed_schemas = {}
         for schema_name in list(schemas.keys()):
-            # Generate new schema name by replacing non-alphabetic characters with empty string
             new_schema_name = re.sub(non_alphabetic_pattern, "", schema_name)
             if new_schema_name != schema_name:
                 renamed_schemas[schema_name] = new_schema_name
 
-        # Apply schema renaming
         for old_name, new_name in renamed_schemas.items():
             schemas[new_name] = schemas.pop(old_name)
-            log.info(f"Renamed schema '{old_name}' to '{new_name}'")
 
-        # Now, update all $ref references in the OpenAPI spec to match the new schema names
         def update_refs(data):
-            """Recursively update all $ref occurrences to match the renamed schema components."""
             if isinstance(data, dict):
                 for key, value in data.items():
                     if key == "$ref" and isinstance(value, str):
@@ -273,33 +222,25 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                 for item in data:
                     update_refs(item)
 
-        # Update references in the entire OpenAPI spec
         update_refs(self.openapi_spec)
 
-    def enable_origin(self, allow_origin):
-        log.info(f"enable_origin: {allow_origin}")
+    def cors_origins(self, cors_origins: List[str]):
+        """
+        Enable CORS for the specified origins.
+
+        Args:
+            cors_origins (List[str]): A list of allowed origins for CORS.
+        """
         paths = self.get_or_create_spec_part(["paths"], True)
         for path in paths:
-            log.info(f"path: {path}")
             paths[path]["options"] = {
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
                 "responses": {
                     "200": {
-                        "description": f"200 response",
-                        "schema": {
-                            "type": "object",
-                        },
+                        "description": "CORS preflight response",
                         "headers": {
-                            "Access-Control-Allow-Origin": {
-                                "type": "string",
-                            },
-                            "Access-Control-Allow-Methods": {
-                                "type": "string",
-                            },
-                            "Access-Control-Allow-Headers": {
-                                "type": "string",
-                            },
+                            "Access-Control-Allow-Origin": {"type": "string"},
+                            "Access-Control-Allow-Methods": {"type": "string"},
+                            "Access-Control-Allow-Headers": {"type": "string"},
                         },
                     },
                 },
@@ -310,30 +251,45 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                             "responseParameters": {
                                 "method.response.header.Access-Control-Allow-Methods": "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'",
                                 "method.response.header.Access-Control-Allow-Headers": "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'",
-                                "method.response.header.Access-Control-Allow-Origin": "'*'",
-                            },
-                            "responseTemplates": {
-                                "application/json": "",
+                                "method.response.header.Access-Control-Allow-Origin": f"'{','.join(cors_origins)}'",
                             },
                         },
                     },
-                    "requestTemplates": {
-                        "application/json": f'{{"statusCode": 200}}',
-                    },
-                    "passthroughBehavior": "when_no_match",
                     "type": "mock",
                 },
             }
 
-        self.get_or_create_spec_part([])["x-amazon-apigateway-cors"] = {
-            "allowOrigins": ["*"],
-            "allowCredentials": True,
-            "allowMethods": ["GET", "POST", "OPTIONS", "PUT", "PATCH", "DELETE"],
-            "allowHeaders": [
-                "Origin",
-                "X-Requested-With",
-                "Content-Type",
-                "Accept",
-                "Authorization",
-            ],
-        }
+    def prefix_paths(self, prefix: str):
+        """
+        Add a prefix to all paths in the OpenAPI spec.
+
+        Args:
+            prefix (str): The prefix to apply to all paths (e.g., "/v1").
+        """
+        paths = self.get_spec_part(["paths"], create=False)
+        if not paths:
+            return
+
+        updated_paths = {}
+        for path, operations in paths.items():
+            new_path = f"{prefix.rstrip('/')}/{path.lstrip('/')}"
+            updated_paths[new_path] = operations
+
+        self.openapi_spec["paths"] = updated_paths
+
+    def remove_unintegrated_operations(self):
+        """
+        Remove operations from the OpenAPI spec that do not have an integration.
+        If a path has no operations left after removal, the path itself is also removed.
+        """
+        paths = self.get_spec_part(["paths"], create=False)
+        if not paths:
+            return
+
+        for path, methods in list(paths.items()):
+            for method, operation in list(methods.items()):
+                if "x-amazon-apigateway-integration" not in operation:
+                    del methods[method]
+
+            if not methods:
+                del paths[path]

@@ -20,6 +20,7 @@ class OpenAPISpecEditor:
                                           or a list of strings containing YAML contents or file paths.
         """
         self.openapi_spec = {}
+        self._yaml = None
 
         if isinstance(spec, dict):
             self.openapi_spec = spec
@@ -250,4 +251,15 @@ class OpenAPISpecEditor:
 
     def to_yaml(self) -> str:
         """Return the OpenAPI specification as a YAML-formatted string."""
-        return yaml.dump(self.openapi_spec)
+        if self.openapi_spec:
+            self._yaml = yaml.dump(self.openapi_spec)
+        else:
+            log.warning("OpenAPI spec is empty, returning empty YAML.")
+            self._yaml = ""
+        return self._yaml
+
+    @property
+    def yaml(self) -> str:
+        if self._yaml is None:
+            self._yaml = self.to_yaml()
+        return self._yaml

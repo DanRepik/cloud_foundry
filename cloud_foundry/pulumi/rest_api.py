@@ -28,13 +28,14 @@ class RestAPI(pulumi.ComponentResource):
     def __init__(
         self,
         name: str,
-        body: Union[str, list[str]],
-        integrations: list[dict] = None,
-        allow_origin: str = False,
-        content: list[dict] = None,
-        token_validators: list[dict] = None,
+        body: Optional[Union[str, list[str]]] = None,
+        integrations: Optional[list[dict]] = None,
+        cors_origins: Optional[str] = False,
+        content: Optional[list[dict]] = None,
+        token_validators: Optional[list[dict]] = None,
         firewall: Optional[RestAPIFirewall] = None,
         logging: Optional[bool] = False,
+        path_prefix: Optional[str] = None,
         opts=None,
     ):
         """
@@ -42,13 +43,14 @@ class RestAPI(pulumi.ComponentResource):
 
         Args:
             name (str): The name of the REST API.
-            body (Union[str, list[str]]): The OpenAPI specification for the API.
-            integrations (list[dict], optional): List of integrations defining Lambda functions for path operations.
-            token_validators (list[dict], optional): List of token validators for authentication.
-            allow_origin (str, optional): If truthy, enables CORS in the API spec.
-            content (list[dict], optional): List of static content definitions (e.g. S3 integrations).
-            firewall (RestAPIFirewall, optional): Firewall configuration.
-            logging (bool, optional): Enable API Gateway stage logging.
+            body (Optional[Union[str, list[str]]]): The OpenAPI specification for the API.
+            integrations (Optional[list[dict]], optional): List of integrations defining Lambda functions for path operations.
+            token_validators (Optional[list[dict]], optional): List of token validators for authentication.
+            cors_origins (Optional[str], optional): If truthy, enables CORS in the API spec.
+            content (Optional[list[dict]], optional): List of static content definitions (e.g. S3 integrations).
+            firewall (Optional[RestAPIFirewall], optional): Firewall configuration.
+            logging (Optional[bool], optional): Enable API Gateway stage logging.
+            path_prefix (Optional[str], optional): A prefix to prepend to all API paths.
             opts (pulumi.ResourceOptions, optional): Additional resource options.
         """
         super().__init__("cloud_foundry:apigw:RestAPI", name, None, opts)
@@ -59,10 +61,11 @@ class RestAPI(pulumi.ComponentResource):
         self.editor = AWSOpenAPISpecEditor(body)
         self.firewall = firewall
         self.logging = logging
+        self.path_prefix = path_prefix
 
-        log.info(f"allow_origin: {allow_origin}")
-        if allow_origin:
-            self.editor.enable_origin(allow_origin)
+        log.info(f"cors_origins: {cors_origins}")
+        if cors_origins:
+            self.editor.cors_origins(cors_origins)
 
         self.arn_slices = []
         all_arns = []
@@ -93,7 +96,8 @@ class RestAPI(pulumi.ComponentResource):
                 all_arns.append(validator["function"].function_name)
                 all_arns.append(validator["function"].invoke_arn)
                 log.info(
-                    f"Adding token validator ARN slices, name: {validator['name']}, length: {len(all_arns)}")
+                    f"Adding token validator ARN slices, name: {validator['name']}, length: {len(all_arns)}"
+                )
             elif "user_pools" in validator:
                 self.arn_slices.append(
                     {
@@ -119,6 +123,7 @@ class RestAPI(pulumi.ComponentResource):
 
         log.info(f"ARN slices: {self.arn_slices}")
         log.info(f"All ARNs: {len(all_arns)}")
+
         # If content is provided, add it to the ARN slices.
         # Wait for all ARNs and function names to resolve, then build the API.
         def build_api(invoke_arns):
@@ -154,7 +159,7 @@ class RestAPI(pulumi.ComponentResource):
                 self.editor.add_token_validator(
                     name=arn_slice["name"],
                     function_name=invoke_arns[index],
-                    invoke_arn=invoke_arns[index +1],
+                    invoke_arn=invoke_arns[index + 1],
                 )
             elif arn_slice["type"] == "pool-validator":
                 self.editor.add_user_pool_validator(
@@ -176,14 +181,19 @@ class RestAPI(pulumi.ComponentResource):
         if self.content:
             self.editor.process_content(self.content, invoke_arns[-1])
 
+        if self.path_prefix:
+            log.info(f"Adding path prefix: {self.path_prefix} to all paths")
+            self.editor.prefix_paths(self.path_prefix)
+        self.editor.remove_unintegrated_operations()
+
         # Write the updated OpenAPI spec to a file for logging or debugging.
-        write_logging_file(f"{self.name}.yaml", self.editor.to_yaml())
+        write_logging_file(f"{self.name}.yaml", self.editor.yaml)
 
         # Create the RestApi resource in AWS API Gateway.
         self.rest_api = aws.apigateway.RestApi(
             self.name,
             name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-rest-api",
-            body=self.editor.to_yaml(),
+            body=self.editor.yaml,
             opts=pulumi.ResourceOptions(parent=self),
         )
 
@@ -367,11 +377,12 @@ def rest_api(
     name: str,
     body: Union[str, list[str]] = None,
     integrations: list[dict] = None,
-    allow_origin: str = False,
+    cors_origins: str = False,
     token_validators: list[dict] = None,
     content: list[dict] = None,
     firewall: RestAPIFirewall = None,
     logging: Optional[bool] = False,
+    path_prefix: Optional[str] = None,
 ):
     """
     Helper function to create and configure a REST API using the RestAPI component.
@@ -381,10 +392,11 @@ def rest_api(
         body (str or list[str]): The OpenAPI specification (as file path or content).
         integrations (list[dict], optional): List of Lambda integrations.
         token_validators (list[dict], optional): List of token validators.
-        allow_origin (str, optional): CORS setting.
+        cors_origins (str, optional): CORS setting.
         content (list[dict], optional): S3 content integrations.
         firewall (RestAPIFirewall, optional): Firewall configuration.
         logging (bool, optional): Enable API stage logging.
+        path_prefix (str, optional): A prefix to prepend to all API paths.
 
     Returns:
         RestAPI: The created REST API component resource.
@@ -394,11 +406,12 @@ def rest_api(
         name=name,
         body=body,
         integrations=integrations,
-        allow_origin=allow_origin,
+        cors_origins=cors_origins,
         token_validators=token_validators,
         content=content,
         firewall=firewall,
         logging=logging,
+        path_prefix=path_prefix,
     )
     log.info("REST API built successfully")
 

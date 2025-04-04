@@ -7,7 +7,7 @@ from cloud_foundry.utils.logger import logger
 log = logger(__name__)
 
 
-class DocumentBucket(pulumi.ComponentResource):
+class DocumentRepository(pulumi.ComponentResource):
     def __init__(self, name, bucket_name: str = None, notifications=None, opts=None):
         super().__init__("cloud_foundry:s3:DocumentBucket", name, {}, opts)
 
@@ -18,7 +18,7 @@ class DocumentBucket(pulumi.ComponentResource):
         log.info(f"Creating S3 bucket: {self.bucket_name}")
 
         # Create an S3 bucket
-        self.bucket = s3.Bucket(f"{name}-document-bucket", bucket=self.bucket_name)
+        self.bucket = s3.Bucket(f"{name}-document-respository", bucket=self.bucket_name)
 
         # Add lambda triggers if provided
         if notifications:
@@ -67,7 +67,11 @@ class DocumentBucket(pulumi.ComponentResource):
             lambda_functions=[
                 {
                     "lambda_function_arn": lambda_function.arn,
-                    "events": ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"],
+                    "events": [
+                        "s3:ObjectCreated:*",
+                        "s3:ObjectRemoved:*",
+                        "s3:ObjectDeleted:*",
+                    ],
                     "filter_prefix": prefix_filter,
                     "filter_suffix": suffix_filter,
                 }
@@ -86,5 +90,5 @@ class DocumentBucket(pulumi.ComponentResource):
         return bucket_notification, lambda_permission
 
 
-def document_bucket(name, bucket_name: str = None, notifications=None, opts=None):
-    return DocumentBucket(name, bucket_name, notifications, opts)
+def document_repository(name, bucket_name: str = None, notifications=None, opts=None):
+    return DocumentRepository(name, bucket_name, notifications, opts)
