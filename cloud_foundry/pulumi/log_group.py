@@ -2,7 +2,10 @@
 
 import pulumi
 
-def log_group(scope: Construct, name: str, retention_in_days: int = 3) -> CloudwatchLogGroup:
+
+def log_group(
+    scope: Construct, name: str, retention_in_days: int = 3
+) -> CloudwatchLogGroup:
     """
     Creates a CloudWatch log group.
 
@@ -13,10 +16,10 @@ def log_group(scope: Construct, name: str, retention_in_days: int = 3) -> Cloudw
     Returns:
         CloudwatchLogGroup: The created CloudWatch log group.
     """
-    return CloudwatchLogGroup(
+    return pulumi.CloudwatchLogGroup(
         scope,
         make_id(scope, name),
         name=f"{scope.config.get('environment')}/{scope.config.get('product')}/{scope.config.get('domain')}/{name}",
         retention_in_days=retention_in_days,
-        tags=make_tags(scope, name)
+        tags=make_tags(scope, name),
     )

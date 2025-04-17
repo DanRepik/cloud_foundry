@@ -29,24 +29,23 @@ class OpenAPISpecEditor:
                 self._merge_spec(individual_spec)
         elif isinstance(spec, str):
             self._merge_spec(spec)
-        log.info(f"Initialized OpenAPISpecEditor with spec: {self.openapi_spec}")
 
     def _merge_spec(self, spec: str):
         """Merge a single OpenAPI spec into the current one."""
         # Check if the string is a file path to a YAML file
-        log.info(f"Loading OpenAPI spec from: {spec}, is file: {os.path.isfile(spec)}")
         if os.path.isfile(spec) and (spec.endswith(".yaml") or spec.endswith(".yml")):
             new_spec_dict = self._load_openapi_spec(spec)
         else:
+            log.info(f"Loading OpenAPI spec from string")
             # Assume the string is YAML content and parse it
             new_spec_dict = yaml.safe_load(spec)
 
-        log.info(f"Loaded OpenAPI spec: {new_spec_dict}")
         # Deep merge the new spec into the current spec
         self.openapi_spec = self._deep_merge(new_spec_dict, self.openapi_spec)
 
     def _load_openapi_spec(self, file_name) -> Dict:
         """Load the OpenAPI spec from a YAML or JSON file."""
+        log.info(f"Loading OpenAPI spec from file: {file_name}")
         with open(file_name, "r") as file:
             if file_name.endswith(".yaml") or file_name.endswith(".yml"):
                 return yaml.safe_load(file)
@@ -260,6 +259,4 @@ class OpenAPISpecEditor:
 
     @property
     def yaml(self) -> str:
-        if self._yaml is None:
-            self._yaml = self.to_yaml()
-        return self._yaml
+        return self.to_yaml()

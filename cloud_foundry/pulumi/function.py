@@ -91,6 +91,14 @@ class Function(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(depends_on=[execution_role], parent=self),
         )
 
+        # Set the retention time for the function logs
+        log_group = aws.cloudwatch.LogGroup(
+            f"{self.name}-log-group",
+            name=f"/aws/lambda/{self._function_name}",
+            retention_in_days=3,  # Set the retention period in days
+            opts=pulumi.ResourceOptions(parent=self.lambda_),
+        )
+
         # Register outputs
         self.register_outputs(
             {

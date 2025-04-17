@@ -9,3 +9,5 @@ from cloud_foundry.pulumi.site_bucket import site_bucket
 from cloud_foundry.pulumi.document_repository import document_repository
 from cloud_foundry.pulumi.cdn import cdn
 from cloud_foundry.pulumi.domain import domain
+
+from cloud_foundry.utils.names import resource_id

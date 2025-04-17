@@ -18,7 +18,11 @@ class DocumentRepository(pulumi.ComponentResource):
         log.info(f"Creating S3 bucket: {self.bucket_name}")
 
         # Create an S3 bucket
-        self.bucket = s3.Bucket(f"{name}-document-respository", bucket=self.bucket_name)
+        self.bucket = s3.Bucket(
+            f"{name}-document-respository",
+            bucket=self.bucket_name,
+            opts=pulumi.ResourceOptions(parent=self),
+        )
 
         # Add lambda triggers if provided
         if notifications:

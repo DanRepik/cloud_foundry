@@ -63,6 +63,8 @@ class RestAPI(pulumi.ComponentResource):
         self.logging = logging
         self.path_prefix = path_prefix
 
+        write_logging_file(f"{self.name}-pre.yaml", self.editor.yaml)
+
         log.info(f"cors_origins: {cors_origins}")
         if cors_origins:
             self.editor.cors_origins(cors_origins)
@@ -75,7 +77,7 @@ class RestAPI(pulumi.ComponentResource):
                     {
                         "type": "integration",
                         "path": integration["path"],
-                        "method": integration["method"],
+                        "method": integration["method"].lower(),
                         "length": 2,
                     }
                 )
@@ -235,8 +237,8 @@ class RestAPI(pulumi.ComponentResource):
                             "httpMethod": "$context.httpMethod",
                             "resourcePath": "$context.resourcePath",
                             "status": "$context.status",
-                            "origin": "$context.request.header.origin",
-                            "authorization": "$context.request.header.authorization",
+                            "origin": "$context.request.header.Origin",
+                            "authorization": "$context.request.header.Authorization",
                             "protocol": "$context.protocol",
                             "responseLength": "$context.responseLength",
                         }
@@ -251,9 +253,12 @@ class RestAPI(pulumi.ComponentResource):
             stage = aws.apigateway.Stage(
                 f"{self.name}-stage",
                 rest_api=self.rest_api.id,
+                description="Stage for API Gateway",
                 deployment=deployment.id,
                 stage_name=self.name,
-                opts=pulumi.ResourceOptions(parent=self, depends_on=[deployment]),
+                opts=pulumi.ResourceOptions(
+                    parent=self, depends_on=[deployment, self.rest_api]
+                ),
             )
 
         # Optionally set up a firewall.
