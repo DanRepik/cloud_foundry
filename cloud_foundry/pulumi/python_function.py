@@ -1,7 +1,5 @@
 # python_function.py
 
-import pulumi
-import pulumi_aws as aws
 from cloud_foundry.utils.logger import logger
 
 from cloud_foundry.python_archive_builder import PythonArchiveBuilder
@@ -16,11 +14,12 @@ def python_function(
     handler: str = None,
     memory_size: int = None,
     timeout: int = None,
-    sources: dict[str, str] = [],
-    requirements: list[str] = [],
-    policy_statements: list[str] = [],
-    environment: dict[str, str] = [],
+    sources: dict[str, str] = None,
+    requirements: list[str] = None,
+    policy_statements: list[str] = None,
+    environment: dict[str, str] = None,
     vpc_config: dict = None,
+    runtime: str = None,
     opts=None,
 ) -> Function:
     archive_builder = PythonArchiveBuilder(
@@ -39,5 +38,6 @@ def python_function(
         environment=environment,
         policy_statements=policy_statements,
         vpc_config=vpc_config,
+        runtime=runtime,
         opts=opts,
     )

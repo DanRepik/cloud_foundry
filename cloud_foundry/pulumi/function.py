@@ -3,6 +3,7 @@
 import pulumi
 import pulumi_aws as aws
 from cloud_foundry.utils.logger import logger
+from cloud_foundry.pulumi.utils import resource_id
 
 log = logger(__name__)
 
@@ -21,7 +22,7 @@ class Function(pulumi.ComponentResource):
         timeout: int = None,
         memory_size: int = None,
         environment: dict[str, str] = None,
-        policy_statements: list = [],
+        policy_statements: list = None,
         vpc_config: dict = None,
         opts=None,
     ):
@@ -34,7 +35,7 @@ class Function(pulumi.ComponentResource):
         self.environment = environment or {}
         self.memory_size = memory_size
         self.timeout = timeout
-        self.policy_statements = policy_statements
+        self.policy_statements = policy_statements or []
         self.vpc_config = vpc_config or {}
         self._function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
 
@@ -92,7 +93,7 @@ class Function(pulumi.ComponentResource):
         )
 
         # Set the retention time for the function logs
-        log_group = aws.cloudwatch.LogGroup(
+        aws.cloudwatch.LogGroup(
             f"{self.name}-log-group",
             name=f"/aws/lambda/{self._function_name}",
             retention_in_days=3,  # Set the retention period in days
@@ -130,7 +131,7 @@ class Function(pulumi.ComponentResource):
         role = aws.iam.Role(
             f"{self.name}-role",
             assume_role_policy=assume_role_policy.json,
-            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-lambda",
+            name=f"{resource_id(self.name)}-lambda",
             opts=pulumi.ResourceOptions(parent=self),
         )
 
@@ -222,14 +223,17 @@ def function(
 
     Args:
         name (str): The name of the Lambda function.
-        archive_location (str): The location of the Lambda function code archive.
+        archive_location (str): The location of the Lambda function code
+            archive.
         hash (str): The source code hash for the Lambda function.
         runtime (str): The runtime for the Lambda function (e.g., Python 3.9).
         handler (str): The handler for the Lambda function.
         timeout (int): The timeout for the Lambda function in seconds.
         memory_size (int): The memory size for the Lambda function in MB.
-        environment (dict[str, str]): Environment variables for the Lambda function.
-        policy_statements (list): IAM policy statements for the Lambda function.
+        environment (dict[str, str]): Environment variables for
+            the Lambda function.
+        policy_statements (list): IAM policy statements for the
+            Lambda function.
         vpc_config (dict): VPC configuration for the Lambda function.
         opts: Pulumi resource options.
 

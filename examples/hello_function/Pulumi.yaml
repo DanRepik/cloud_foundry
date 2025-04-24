@@ -1,0 +1,11 @@
+name: hello-function
+runtime:
+  name: python
+  options:
+    toolchain: pip
+    virtualenv: venv
+description: Basic hello world function with in line code
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: aws-python
