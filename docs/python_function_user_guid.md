@@ -100,8 +100,8 @@ lambda_function = cloud_foundry.python_function(
     policy_statements=[
         {
             "Effect": "Allow",
-            "Action": ["s3:PutObject", "s3:GetObject"],
-            "Resource": ["arn:aws:s3:::example-bucket/*"],
+            "Actions": ["s3:PutObject", "s3:GetObject"],
+            "Resources": ["arn:aws:s3:::example-bucket/*"],
         },
     ],
 )

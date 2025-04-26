@@ -3,7 +3,7 @@
 import pulumi
 import pulumi_aws as aws
 from cloud_foundry.utils.logger import logger
-from cloud_foundry.pulumi.utils import resource_id
+from cloud_foundry.utils.names import resource_id
 
 log = logger(__name__)
 
@@ -38,6 +38,15 @@ class Function(pulumi.ComponentResource):
         self.policy_statements = policy_statements or []
         self.vpc_config = vpc_config or {}
         self._function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
+        # Validate that the environment is a dictionary with string keys and values
+        if not isinstance(self.environment, dict) or not all(
+            isinstance(k, str) and isinstance(v, str)
+            for k, v in self.environment.items()
+        ):
+            raise ValueError(
+                "The 'environment' parameter must be a dictionary with string keys and string values. "
+                + f"environment: {self.environment}"
+            )
 
         # Import existing Lambda function if no creation parameters are provided
         if not archive_location and not hash and not runtime and not handler:
@@ -151,9 +160,10 @@ class Function(pulumi.ComponentResource):
         # Add user-defined policy statements
         for statement in self.policy_statements:
             if isinstance(statement, dict):
+                log.info(f"Adding user-defined policy statement: {statement}")
                 policy_statements.append(
                     aws.iam.GetPolicyDocumentStatementArgs(
-                        effect=statement["Effect"],
+                        effect=statement.get("Effect", "Allow"),
                         actions=statement["Actions"],
                         resources=statement["Resources"],
                     )
@@ -187,6 +197,7 @@ class Function(pulumi.ComponentResource):
             )
 
         # Create the policy document
+        log.info(f"policy_statements: {policy_statements}")
         policy_document = aws.iam.get_policy_document(statements=policy_statements)
 
         # Attach the policy to the role
