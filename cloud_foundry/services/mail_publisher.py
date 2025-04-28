@@ -1,6 +1,5 @@
 import boto3
 import json
-from importlib import resources
 from jinja2 import Template
 import os
 import logging
@@ -16,7 +15,31 @@ MAIL_ORIGIN = os.environ["MAIL_ORIGIN"]
 def handler(event, context):
     log.info("Received event: %s", json.dumps(event))
     try:
-        sns_message = json.loads(event["Records"][0]["Sns"]["Message"])
+        responses = []
+        for record in event["Records"]:
+            if "Sns" in record:
+                sns_message = json.loads(record["Sns"]["Message"])
+            elif "body" in record:
+                sns_message = json.loads(record["body"])
+            else:
+                raise ValueError("Unsupported message format")
+            template_name = sns_message["template_name"]
+            context_data = sns_message["context"]
+            recipients = sns_message["recipients"]
+            subject = sns_message["subject"]
+            cc = sns_message.get("cc", [])  # Get CC list, default to an empty list
+            bcc = sns_message.get("bcc", [])  # Get BCC list, default to an empty list
+
+            email_body = render_template(template_name, context_data)
+            response = send_email(recipients, subject, email_body, cc, bcc)
+            responses.append(response)
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps(
+                {"message": "Emails sent successfully", "responses": responses}
+            ),
+        }
         template_name = sns_message["template_name"]
         context_data = sns_message["context"]
         recipients = sns_message["recipients"]
