@@ -1,3 +1,4 @@
 pulumi
 pulumi-aws
+boto3
 cloud_foundry

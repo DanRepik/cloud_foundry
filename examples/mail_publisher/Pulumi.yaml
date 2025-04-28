@@ -1,0 +1,11 @@
+name: mail-publisher
+runtime:
+  name: python
+  options:
+    toolchain: pip
+    virtualenv: venv
+description: Set up a mail publisher topic and service
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: aws-python

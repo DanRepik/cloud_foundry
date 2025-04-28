@@ -133,7 +133,6 @@ class PythonArchiveBuilder(ArchiveBuilder):
         for destination, source in self._sources.items():
             destination_path = os.path.join(self._staging, destination)
             try:
-                log.info(f"Copying file {source} to {destination_path}")
                 if os.path.isdir(source):
                     shutil.copytree(source, destination_path)
                     log.info(f"Folder copied from {source} to {destination_path}")
@@ -145,6 +144,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
                 else:  # Inline content
                     with open(destination_path, "w") as f:
                         f.write(source + "\n")
+                    log.info(f"In line source copied to {destination_path}")
             except Exception as e:
                 log.error(f"Error copying {source} to {destination_path}: {e}")
                 raise
