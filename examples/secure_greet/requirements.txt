@@ -1,0 +1,9 @@
+pulumi
+pulumi-aws
+
+#cloud_foundry
+
+requests
+python-dotenv
+
+-e ../..

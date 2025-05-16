@@ -1,0 +1,11 @@
+name: security-services
+description: A simple collecton of security services
+runtime:
+  name: python
+  options:
+    toolchain: pip
+    virtualenv: venv
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: aws-python

@@ -1,0 +1,10 @@
+pulumi
+pulumi-aws
+dotenv
+boto3
+
+#cloud_foundry
+
+requests
+
+-e ../..

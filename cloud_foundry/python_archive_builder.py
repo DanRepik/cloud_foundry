@@ -13,9 +13,10 @@ log = logger(__name__)
 
 class PythonArchiveBuilder(ArchiveBuilder):
     """
-    A class responsible for building Python Lambda function archives with dependencies
-    and source code. The class supports caching through hash comparisons to avoid redundant
-    builds and includes functionality to install Python packages in the Lambda package.
+    A class responsible for building Python Lambda function archives with
+    dependencies and source code. The class supports caching through hash
+    comparisons to avoid redundant builds and includes functionality to
+    install Python packages in the Lambda package.
     """
 
     _hash: str  # Stores the computed hash of the archive
@@ -34,9 +35,12 @@ class PythonArchiveBuilder(ArchiveBuilder):
 
         Args:
             name (str): The name of the archive/Lambda function.
-            sources (dict[str, str]): Dictionary mapping destination file paths to source file paths or inline code.
-            requirements (list[str]): List of Python package requirements to be installed.
-            working_dir (str): The working directory where intermediate and final outputs are stored.
+            sources (dict[str, str]): Dictionary mapping destination file
+            paths to source file paths or inline code.
+            requirements (list[str]): List of Python package requirements to
+            be installed.
+            working_dir (str): The working directory where intermediate and
+            final outputs are stored.
         """
         self.name = name
         self._sources = sources
@@ -56,7 +60,8 @@ class PythonArchiveBuilder(ArchiveBuilder):
             # If the hash matches, use the existing archive
             self._hash = old_hash or ""
         else:
-            # Otherwise, install the requirements, build a new archive, and update the hash
+            # Otherwise, install the requirements, build a new archive, and
+            # update the hash
             self.install_requirements()
             self.build_archive()
             self._hash = new_hash
@@ -72,8 +77,9 @@ class PythonArchiveBuilder(ArchiveBuilder):
 
     def prepare(self):
         """
-        Prepare the staging and library directories where the function source code and dependencies
-        will be copied before packaging. Clean any previous contents in the directories.
+        Prepare the staging and library directories where the function source code
+        and dependencies will be copied before packaging. Clean any previous
+        contents in the directories.
         """
         # Base directory where Lambda-related files will be stored
         self._base_dir = os.path.join(self._working_dir, f"{self.name}-lambda")
@@ -121,8 +127,8 @@ class PythonArchiveBuilder(ArchiveBuilder):
 
     def install_sources(self):
         """
-        Copy the specified source files into the staging directory. Sources can be directories,
-        files, or inline content.
+        Copy the specified source files into the staging directory. Sources
+        can be directories, files, or inline content.
         """
         log.info(f"installing resources: {self.name}")
         if not self._sources:
@@ -137,7 +143,6 @@ class PythonArchiveBuilder(ArchiveBuilder):
                     shutil.copytree(source, destination_path)
                     log.info(f"Folder copied from {source} to {destination_path}")
                 elif os.path.isfile(source):
-                    log.info("is file")
                     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
                     shutil.copy2(source, destination_path)
                     log.info(f"File copied from {source} to {destination_path}")
@@ -151,7 +156,8 @@ class PythonArchiveBuilder(ArchiveBuilder):
 
     def write_requirements(self):
         """
-        Write the Python package requirements into a 'requirements.txt' file in the staging area.
+        Write the Python package requirements into a 'requirements.txt' file
+        in the staging area.
         """
         log.debug("writing requirements")
         if not self._requirements:
@@ -168,7 +174,8 @@ class PythonArchiveBuilder(ArchiveBuilder):
 
     def install_requirements(self):
         """
-        Install the required Python packages in the 'libs' directory for packaging into the Lambda archive.
+        Install the required Python packages in the 'libs' directory for
+        packaging into the Lambda archive.
         """
         log.info(f"installing packages {self.name}")
         requirements_file = os.path.join(self._staging, "requirements.txt")
@@ -213,7 +220,8 @@ class PythonArchiveBuilder(ArchiveBuilder):
 
     def create_clean_folder(self, folder_path):
         """
-        Create a clean folder by removing existing contents or creating the folder if it doesn't exist.
+        Create a clean folder by removing existing contents or creating the
+        folder if it doesn't exist.
 
         Args:
             folder_path (str): Path to the folder to clean or create.
@@ -231,7 +239,8 @@ class PythonArchiveBuilder(ArchiveBuilder):
         Remove all files and folders from the specified folder.
 
         Args:
-            folder_path (str): Path to the folder from which to remove files and folders.
+            folder_path (str): Path to the folder from which to remove
+            files and folders.
 
         Returns:
             None

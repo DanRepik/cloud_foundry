@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from cloud_foundry.pulumi.cdn_api_origin import ApiOrigin, ApiOriginArgs
 from cloud_foundry.pulumi.cdn_site_origin import SiteOrigin, SiteOriginArgs
+from cloud_foundry.pulumi.custom_domain import CustomCertificate
 from cloud_foundry.utils.logger import logger
 
 log = logger(__name__)
@@ -43,10 +44,11 @@ class CDN(pulumi.ComponentResource):
         self.domain_name = f"{pulumi.get_stack()}.{args.site_domain_name}"
 
         origins, caches, target_origin_id = self.get_origins(name, args)
-        certificate, validation = self.set_up_certificate(
+        custom_certificate = CustomCertificate(
             name,
+            self.hosted_zone_id,
             self.domain_name,
-            [args.site_domain_name] if args.create_apex else None,
+            alternative_names=[args.site_domain_name] if args.create_apex else None,
         )
 
         log.info("Creating CloudFront distribution")
@@ -109,7 +111,7 @@ class CDN(pulumi.ComponentResource):
                 )
             ),
             viewer_certificate={
-                "acm_certificate_arn": certificate.arn,
+                "acm_certificate_arn": custom_certificate.certificate.arn,
                 "ssl_support_method": "sni-only",
                 "minimum_protocol_version": "TLSv1.2_2021",
             },
@@ -117,7 +119,7 @@ class CDN(pulumi.ComponentResource):
             custom_error_responses=args.error_responses or [],
             opts=ResourceOptions(
                 parent=self,
-                depends_on=[certificate, validation],
+                depends_on=[custom_certificate],
                 custom_timeouts={"delete": "30m"},
             ),
         )
@@ -201,7 +203,7 @@ class CDN(pulumi.ComponentResource):
         return origins, caches, target_origin_id
 
     def set_up_certificate(
-        self, name, domain_name, alternative_names: Optional[List[str]] = []
+        self, name, domain_name, alternative_names: Optional[List[str]] = None
     ):
         certificate = aws.acm.Certificate(
             f"{name}-certificate",
@@ -262,7 +264,7 @@ class CDN(pulumi.ComponentResource):
         )
 
         # Define the base path mapping
-        base_path_mapping = aws.apigateway.BasePathMapping(
+        aws.apigateway.BasePathMapping(
             f"{name}-base-path-map",
             rest_api=rest_api_id,
             stage_name=stage_name,
@@ -271,7 +273,7 @@ class CDN(pulumi.ComponentResource):
         )
 
         # Define the DNS record
-        dns_record = aws.route53.Record(
+        aws.route53.Record(
             f"{name}-dns-record",
             name=custom_domain.domain_name,
             type="A",

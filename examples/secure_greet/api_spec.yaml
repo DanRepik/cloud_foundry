@@ -1,0 +1,45 @@
+# api_config.yaml
+openapi: 3.0.3
+info:
+  description: A simple API that returns a greeting message.
+  title: Greeting API
+  version: 1.0.0
+paths:
+  /greet:
+    get:
+      summary: Returns a greeting message.
+      description: |
+        This endpoint returns a greeting message. It accepts an optional
+        query parameter `name`. If `name` is not provided, it defaults to "World".
+      security:
+        - auth: []
+      parameters:
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: The name of the person to greet.
+          example: John
+      responses:
+        200:
+          description: A greeting message.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    description: The greeting message.
+                    example: Hello, John!
+        400:
+          description: Bad Request - Invalid query parameter.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: A description of the error.
+                    example: Invalid query parameter

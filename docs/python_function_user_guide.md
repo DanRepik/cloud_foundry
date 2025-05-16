@@ -158,6 +158,9 @@ While the `Hello World` example provides a foundational understanding of buildin
 
 In this section, we’ll create an email publisher service using `python_function`. This service will asynchronously send emails by receiving notifications from AWS SNS Topics or SQS queues. Allowing customer based services to be more responsive since they are not waiting on emails be assembled and sent.
 
+Complete source code can be found on GitHub at; https://github.com/DanRepik/cloud_foundry/tree/main/examples/mail_publisher
+
+
 ### Service Overview
 
 The email publisher service will:

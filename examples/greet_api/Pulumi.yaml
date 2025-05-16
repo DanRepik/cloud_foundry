@@ -1,0 +1,11 @@
+name: greet-api
+description: A simple hello world function with in line code
+runtime:
+  name: python
+  options:
+    toolchain: pip
+    virtualenv: venv
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: aws-python

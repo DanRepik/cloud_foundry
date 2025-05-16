@@ -40,7 +40,7 @@ class Function(pulumi.ComponentResource):
         self._function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
         # Validate that the environment is a dictionary with string keys and values
         if not isinstance(self.environment, dict) or not all(
-            isinstance(k, str) and isinstance(v, str)
+            isinstance(k, str) and (isinstance(v, str) or isinstance(v, pulumi.Output))
             for k, v in self.environment.items()
         ):
             raise ValueError(
