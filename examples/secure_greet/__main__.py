@@ -12,7 +12,14 @@ greet_function = cloud_foundry.python_function(
 
 greet_api = cloud_foundry.rest_api(
     "greet-api",
-    specification=["api_spec.yaml", "s3://repik-apis/security-api.yaml"],
+    #    specification=["api_spec.yaml", "s3://repik-apis/security-api.yaml"],
+    specification="api_spec.yaml",
     integrations=[{"path": "/greet", "method": "get", "function": greet_function}],
+    token_validators=[
+        {
+            "name": "auth",
+            "user_pools": [os.environ.get("USER_POOL_ARN")],
+        }
+    ],
     hosted_zone_id=os.environ.get("HOSTED_ZONE_ID"),
 )

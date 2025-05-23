@@ -1,10 +1,20 @@
 import pulumi
 import pulumi_aws as aws
 from pulumi import ResourceOptions
-from typing import Optional, List
 from logging import getLogger
 
 log = getLogger(__name__)
+
+
+def domain_from_subdomain(
+    name: str, subdomain: str, hosted_zone_id
+) -> pulumi.Output[str]:
+    log.info(
+        "Creating domain from subdomain:"
+        + f" {subdomain} in hosted zone ID: {hosted_zone_id}"
+    )
+    hosted_zone = aws.route53.Zone.get(f"{name}-hosted-zone", id=hosted_zone_id)
+    return pulumi.Output.concat(subdomain, ".", hosted_zone.name)
 
 
 class CustomCertificate(pulumi.ComponentResource):
@@ -13,16 +23,17 @@ class CustomCertificate(pulumi.ComponentResource):
         name: str,
         hosted_zone_id: str,
         subdomain: str,
-        alternative_names: Optional[List[str]] = None,
+        include_apex: bool = False,
         opts: ResourceOptions = None,
     ):
         super().__init__("cloud_foundry:apigw:CustomCertificate", name, {}, opts)
 
         log.info(f"Hosted zone ID: {hosted_zone_id}")
-        hosted_zone = aws.route53.Zone.get(f"{name}-hosted-zone", id=hosted_zone_id)
-        #        log.info(f"Hosted zone: {hosted_zone}")
-        self.hosted_zone_name = hosted_zone.name
-        self.domain_name = pulumi.Output.concat(subdomain, ".", self.hosted_zone_name)
+        self.domain_name = domain_from_subdomain(
+            f"{name}-cert", subdomain, hosted_zone_id
+        )
+
+        alternative_names = [self.hosted_zone_name] if include_apex else []
 
         self.certificate = aws.acm.Certificate(
             f"{name}-certificate",
@@ -69,14 +80,12 @@ class CustomGatewayDomain(CustomCertificate):
         subdomain: str,
         rest_api_id: str,
         stage_name: str,
-        alternative_names: Optional[List[str]] = None,
         opts: ResourceOptions = None,
     ):
         super().__init__(
             name=name,
             hosted_zone_id=hosted_zone_id,
             subdomain=subdomain,
-            alternative_names=alternative_names,
             opts=opts,
         )
 
@@ -100,6 +109,7 @@ class CustomGatewayDomain(CustomCertificate):
         )
 
         # Define the DNS record
+        log.info(f"Creating DNS record for {name} with domain name: {self.domain_name}")
         aws.route53.Record(
             f"{name}-dns-record",
             name=custom_domain.domain_name,

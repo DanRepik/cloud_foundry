@@ -3,55 +3,78 @@ import pulumi_aws as aws
 from pulumi import ResourceOptions
 from typing import List, Optional
 
-from cloud_foundry.pulumi.cdn_api_origin import ApiOrigin, ApiOriginArgs
-from cloud_foundry.pulumi.cdn_site_origin import SiteOrigin, SiteOriginArgs
-from cloud_foundry.pulumi.custom_domain import CustomCertificate
+from cloud_foundry.pulumi.cdn_api_origin import ApiOrigin
+from cloud_foundry.pulumi.cdn_site_origin import SiteOrigin
+from cloud_foundry.pulumi.custom_domain import CustomCertificate, domain_from_subdomain
+from cloud_foundry.pulumi.rest_api import RestAPI
 from cloud_foundry.utils.logger import logger
 
 log = logger(__name__)
+
+DEFAULT_BLACKLIST_COUNTRIES = [
+    "CN",  # Example: Block China
+    "RU",  # Example: Block Russia
+    "CU",  # Example: Block Cuba
+    "KP",  # Example: Block North Korea
+    "IR",  # Example: Block Iran
+    "BY",  # Example: Block Belarus
+]
 
 
 class CDNArgs:
     def __init__(
         self,
-        sites: Optional[List[dict]] = None,
-        apis: Optional[List[dict]] = None,
+        origins: Optional[List[dict]] = None,
         create_apex: Optional[bool] = False,
         hosted_zone_id: Optional[str] = None,
-        site_domain_name: Optional[str] = None,
+        subdomain: Optional[str] = None,
         error_responses: Optional[list] = None,
         root_uri: Optional[str] = None,
         whitelist_countries: Optional[List[str]] = None,
+        blacklist_countries: Optional[List[str]] = None,
     ):
-        self.sites = sites
-        self.apis = apis
+        self.origins = origins
         self.create_apex = create_apex
         self.hosted_zone_id = hosted_zone_id
-        self.site_domain_name = site_domain_name
+        self.subdomain = subdomain
         self.error_responses = error_responses
         self.root_uri = root_uri
         self.whitelist_countries = whitelist_countries
+        self.blacklist_countries = blacklist_countries
 
 
 class CDN(pulumi.ComponentResource):
     def __init__(self, name: str, args: CDNArgs, opts: ResourceOptions = None):
         super().__init__("cloud_foundry:pulumi:CDN", name, {}, opts)
 
-        if not args.sites and not args.apis:
-            raise ValueError("At least one site or API should be present")
+        self.hosted_zone_id = args.hosted_zone_id
+        log.info(f"subdomain: {args.subdomain}")
+        self.subdomain = args.subdomain or pulumi.get_stack()
+        self.domain_name = domain_from_subdomain(
+            name, self.subdomain, self.hosted_zone_id
+        )
 
-        self.hosted_zone_id = args.hosted_zone_id or self.find_hosted_zone_id(name)
-        self.domain_name = f"{pulumi.get_stack()}.{args.site_domain_name}"
-
-        origins, caches, target_origin_id = self.get_origins(name, args)
         custom_certificate = CustomCertificate(
             name,
-            self.hosted_zone_id,
-            self.domain_name,
-            alternative_names=[args.site_domain_name] if args.create_apex else None,
+            hosted_zone_id=self.hosted_zone_id,
+            subdomain=self.subdomain,
+            include_apex=args.create_apex,
         )
 
         log.info("Creating CloudFront distribution")
+
+        log.info(
+            "aliases:"
+            + {
+                (
+                    [self.domain_name, args.site_domain_name]
+                    if args.create_apex
+                    else [self.domain_name]
+                )
+            }
+        )
+
+        origins, caches, target_origin_id = self.get_origins(name, args.origins)
         self.distribution = aws.cloudfront.Distribution(
             f"{name}-distro",
             comment=f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}",
@@ -92,22 +115,14 @@ class CDN(pulumi.ComponentResource):
             price_class="PriceClass_100",
             restrictions=aws.cloudfront.DistributionRestrictionsArgs(
                 geo_restriction=aws.cloudfront.DistributionRestrictionsGeoRestrictionArgs(
-                    restriction_type="whitelist",
-                    locations=args.whitelist_countries
-                    or [
-                        "US",
-                        "CA",
-                        "GB",
-                        "IE",
-                        "MT",
-                        "FR",
-                        "BR",
-                        "BG",
-                        "ES",
-                        "CH",
-                        "AE",
-                        "DE",
-                    ],
+                    restriction_type=(
+                        "whitelist" if args.whitelist_countries else "blacklist"
+                    ),
+                    locations=(
+                        args.whitelist_countries
+                        if args.whitelist_countries
+                        else args.blacklist_countries or DEFAULT_BLACKLIST_COUNTRIES
+                    ),
                 )
             ),
             viewer_certificate={
@@ -131,7 +146,9 @@ class CDN(pulumi.ComponentResource):
             log.info(f"Setting up DNS alias for hosted zone ID: {self.hosted_zone_id}")
             self.dns_alias = aws.route53.Record(
                 f"{name}-alias",
-                name=self.domain_name,
+                name=domain_from_subdomain(
+                    f"{name}-cdn", self.subdomain, self.hosted_zone_id
+                ),
                 type="A",
                 zone_id=self.hosted_zone_id,
                 aliases=[
@@ -166,45 +183,91 @@ class CDN(pulumi.ComponentResource):
         else:
             self.domain_name = self.distribution.domain_name
 
-    def get_origins(self, name: str, args: CDNArgs):
+    def get_origins(self, name: str, origins: List[dict]):
         target_origin_id = None
-        origins = []
+        cdn_origins = []
         caches = []
         self.site_origins = []
 
-        if args.sites:
-            for site_args in args.sites:
-                site = SiteOrigin(f"{name}-{site_args.name}", site_args)
-                origins.append(site.distribution_origin)
-                self.site_origins.append(site)
-                if site_args.is_target_origin:
-                    target_origin_id = site_args.origin_id
+        for origin in origins:
 
-        if args.apis:
-            for api_args in args.apis:
-                if self.hosted_zone_id and api_args.rest_api:
-                    api_args.domain_name = self.setup_custom_domain(
-                        name=api_args.name,
-                        hosted_zone_id=self.hosted_zone_id,
-                        domain_name=f"{api_args.name}-{self.domain_name}",
-                        stage_name=api_args.rest_api.name,
-                        rest_api_id=api_args.rest_api.rest_api_id,
+            log.info(f"Configuring origin: {origin}")
+            cdn_origin = None
+            if "bucket" in origin:
+                cdn_origin = SiteOrigin(
+                    f"{name}-{origin["name"]}",
+                    bucket=origin["bucket"],
+                    origin_path=origin.get("origin_path"),
+                    origin_shield_region=origin.get("origin_shield_region"),
+                )
+                cdn_origins.append(cdn_origin.distribution_origin)
+                self.site_origins.append(cdn_origin)
+
+            elif "domain_name" in origin:
+                cdn_origin = ApiOrigin(f"{name}-{origin["name"]}", origin)
+                cdn_origins.append(cdn_origin.distribution_origin)
+                caches.append(cdn_origin.cache_behavior)
+
+            elif "rest_api" in origin:
+                rest_api = origin["rest_api"]
+
+                domain_name = None
+                if isinstance(rest_api, RestAPI):
+                    domain_name = rest_api.domain
+                    if not domain_name:
+                        domain_name = rest_api.create_custom_domain(
+                            self.hosted_zone_id,
+                            pulumi.Output.concat(origin["name"], "-", self.subdomain),
+                        )
+                else:
+                    if isinstance(rest_api, aws.apigateway.RestApi):
+                        domain_name = self.setup_custom_domain(
+                            name=origin["name"],
+                            hosted_zone_id=self.hosted_zone_id,
+                            domain_name=pulumi.Output.concat(
+                                origin["name"], "-", pulumi.get_stack()
+                            ),
+                            stage_name=origin.rest_api.name,
+                            rest_api_id=origin.rest_api.id,
+                        )
+
+                if domain_name is None:
+                    raise ValueError(
+                        f"Could not resolve domain name for origin: {origin["name"]}"
                     )
-                api_origin = ApiOrigin(f"{name}-{api_args.name}", api_args)
-                origins.append(api_origin.distribution_origin)
-                caches.append(api_origin.cache_behavior)
-                if api_args.is_target_origin:
-                    target_origin_id = api_args.origin_id
+
+                cdn_origin = ApiOrigin(
+                    f"{name}-{origin["name"]}",
+                    domain_name=domain_name,
+                    path_pattern=origin.get("path_pattern"),
+                    origin_path=origin.get("origin_path"),
+                    shield_region=origin.get("shield_region"),
+                    api_key_password=origin.get("api_key_password"),
+                )
+                cdn_origins.append(cdn_origin.distribution_origin)
+                caches.append(cdn_origin.cache_behavior)
+
+            if cdn_origin is None:
+                raise ValueError(f"Invalid origin configuration: {origin}")
+
+            if "is_target_origin" in origin and origin["is_target_origin"]:
+                target_origin_id = cdn_origin.origin_id
 
         if target_origin_id is None:
-            target_origin_id = origins[0].origin_id
+            target_origin_id = cdn_origins[0].origin_id
 
         log.info(f"Configured target origin ID: {target_origin_id}")
-        return origins, caches, target_origin_id
+        return cdn_origins, caches, target_origin_id
 
     def set_up_certificate(
         self, name, domain_name, alternative_names: Optional[List[str]] = None
     ):
+        if not self.hosted_zone_id:
+            raise ValueError(
+                "Hosted zone ID is required for custom domain setup. "
+                + f"domain_name: {domain_name}."
+            )
+
         certificate = aws.acm.Certificate(
             f"{name}-certificate",
             domain_name=domain_name,
@@ -297,30 +360,21 @@ class CDN(pulumi.ComponentResource):
 
 def cdn(
     name: str,
-    sites: list[dict],
-    apis: list[dict],
+    origins: list[dict],
     hosted_zone_id: Optional[str] = None,
-    site_domain_name: Optional[str] = None,
+    subdomain: Optional[str] = None,
     error_responses: Optional[list] = None,
     create_apex: Optional[bool] = False,
     root_uri: Optional[str] = None,
     opts: ResourceOptions = None,
 ) -> CDN:
-    site_origins = []
-    for site in sites:
-        log.info(f"site: {site}")
-        site_origins.append(SiteOriginArgs(**site))
-    api_origins = []
-    for api in apis:
-        log.info(f"api: {api}")
-        api_origins.append(ApiOriginArgs(**api))
+
     return CDN(
         name,
         CDNArgs(
-            sites=site_origins,
-            apis=api_origins,
+            origins=origins,
             hosted_zone_id=hosted_zone_id,
-            site_domain_name=site_domain_name,
+            subdomain=subdomain,
             error_responses=error_responses,
             create_apex=create_apex,
             root_uri=root_uri,

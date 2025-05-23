@@ -3,6 +3,8 @@ import json
 
 
 def handler(event, _):
+    print(event)
+    print(f"username: {event.get('requestContext', {})}")
     name = (event.get("queryStringParameters") or {}).get("name", "World")
 
     return {

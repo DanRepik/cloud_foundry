@@ -150,7 +150,7 @@ def get_policy(policy_resource_base: str, decoded: dict, is_ws: bool) -> dict:
         if perms in user_permissions or perms == "principalId":
             for endpoint in endpoints:
                 if not is_ws and "method" in endpoint and "resourcePath" in endpoint:
-                    url_build = f"{policy_resource_base}{endpoint['method']}{endpoint['resourcePath']}"
+                    url_build = f"{policy_resource_base}{endpoint['method']}{endpoint['resourcePath']}"  # noqa: E501
                 elif is_ws and "routeKey" in endpoint:
                     url_build = f"{policy_resource_base}{endpoint['routeKey']}"
                 else:

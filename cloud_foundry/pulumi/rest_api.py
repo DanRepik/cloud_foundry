@@ -7,7 +7,6 @@ from typing import Optional, Union
 from cloud_foundry.utils.logger import logger, write_logging_file
 from cloud_foundry.utils.localstack import is_localstack_deployment
 from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
-from .api_waf import RestAPIFirewall, GatewayRestApiWAF
 from cloud_foundry.pulumi.custom_domain import CustomGatewayDomain
 from cloud_foundry.utils.names import resource_id
 
@@ -26,6 +25,7 @@ class RestAPI(pulumi.ComponentResource):
 
     rest_api: Optional[aws.apigateway.RestApi] = None
     rest_api_id: pulumi.Output[str] = None  # The REST API identifier
+    domain: Optional[str] = None  # The custom domain name for the API
 
     def __init__(
         self,
@@ -79,24 +79,69 @@ class RestAPI(pulumi.ComponentResource):
         self.path_prefix = path_prefix
         self.export_api = export_api
 
+        # Validate token validators before proceeding
+        self._validate_token_validators()
+
+        # Write the initial OpenAPI spec to a file for debugging
         write_logging_file(f"{self.name}-pre.yaml", self.editor.yaml)
 
-        log.info(f"cors_origins: {cors_origins}")
-        if cors_origins:
-            self.editor.cors_origins(cors_origins)
-
+        # Collect ARNs for integrations and token validators
         all_arns, self.arn_alloc = self._collect_arns()
 
-        # If content is provided, add it to the ARN slices.
-        # Wait for all ARNs and function names to resolve, then build the API.
-        def build(invoke_arns):
-            self.invoke_arns = invoke_arns
-            self._build_spec(invoke_arns)
-            return self._build_api()
-
-        self.rest_api_id = pulumi.Output.all(*all_arns).apply(
-            lambda resolved_arns: build(resolved_arns)
+        # Build the API spec and create the RestApi resource
+        self.rest_api = pulumi.Output.all(*all_arns).apply(
+            lambda resolved_arns: self._create_rest_api(resolved_arns)
         )
+
+        # Create the API Gateway stage
+        self.stage = self.rest_api.apply(lambda rest_api: self._create_stage(rest_api))
+
+        # Optionally set up a custom domain
+        if self.hosted_zone_id:
+            self.domain = self.stage.apply(
+                lambda stage: self.create_custom_domain(
+                    self.hosted_zone_id, self.subdomain
+                )
+            )
+
+        # Register outputs
+        self.register_outputs(
+            {
+                "rest_api_id": self.rest_api.apply(lambda r: r.id),
+                "stage_name": self.stage.apply(lambda s: s.stage_name),
+            }
+        )
+
+    def _validate_token_validators(self):
+        """
+        Validate the token_validators attribute to ensure:
+        - Each validator has a unique name.
+        - Either 'user_pools' or 'function' is defined, but not both.
+        """
+        if not self.token_validators:
+            return
+
+        seen_names = set()
+        for validator in self.token_validators:
+            name = validator.get("name")
+            if not name:
+                raise ValueError("Each token validator must have a 'name' attribute.")
+            if name in seen_names:
+                raise ValueError(f"Duplicate token validator name found: {name}")
+            seen_names.add(name)
+
+        has_user_pools = "user_pools" in validator
+        has_function = "function" in validator
+        if has_user_pools and has_function:
+            raise ValueError(
+                f"Token validator '{name}' "
+                + "cannot have both 'user_pools' and 'function' defined."
+            )
+        if not has_user_pools and not has_function:
+            raise ValueError(
+                f"Token validator '{name}' "
+                + "must have either 'user_pools' or 'function' defined."
+            )
 
     def _collect_arns(self):
         arn_alloc = []
@@ -175,7 +220,7 @@ class RestAPI(pulumi.ComponentResource):
     def _build_spec(self, invoke_arns: list[str]) -> str:
         log.info("Building API spec with AWSOpenAPISpecEditor")
 
-        log.info(f"Invoke ARNs: {len(self.invoke_arns)}")
+        log.info(f"Invoke ARNs: {len(invoke_arns)}")
         for arn_slice in self.arn_alloc:
             log.info(f"Processing ARN slice: {arn_slice}")
             if arn_slice["type"] == "integration":
@@ -247,64 +292,34 @@ class RestAPI(pulumi.ComponentResource):
         write_logging_file(f"{self.name}.yaml", self.editor.yaml)
         return self.editor.yaml
 
-    def _build_api(self) -> pulumi.Output[None]:
+    def _create_rest_api(self, invoke_arns: list[str]) -> aws.apigateway.RestApi:
+        """
+        Create the RestApi resource in AWS API Gateway.
+        """
+        log.info("Building API spec with AWSOpenAPISpecEditor")
+        self._build_spec(invoke_arns)
+        self._create_lambda_permissions()
+        self._create_cognito_permissions(invoke_arns)
 
-        # Create the RestApi resource in AWS API Gateway.
-        self.rest_api = aws.apigateway.RestApi(
+        log.info("Creating RestApi resource")
+        return aws.apigateway.RestApi(
             self.name,
             name=resource_id(f"{self.name}-rest-api"),
             body=self.editor.yaml,
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        # Add permissions so that API Gateway can invoke the Lambda functions.
-        self._create_lambda_permissions()
-        self._create_cognito_permissions()
-        stage = self._create_stage()
-
-        # Optionally set up a firewall.
-        if self.firewall:
-            log.info("Setting up firewall for API")
-            waf = GatewayRestApiWAF(f"{self.name}-waf", self.firewall)
-            # Uncomment the following lines to attach the WAF if desired:
-            # aws.wafv2.WebAclAssociation(
-            #     f"{self.name}-waf-association",
-            #     resource_arn=stage.arn,
-            #     web_acl_arn=waf.arn,
-            #     opts=pulumi.ResourceOptions(parent=self),
-            # )
-
-        if self.hosted_zone_id:
-            subdomain = (
-                self.subdomain
-                if self.subdomain
-                else f"{pulumi.get_project()}-{pulumi.get_stack()}"
-            )
-            log.info(f"Setting up custom domain for API: {subdomain}")
-            custom_domain = CustomGatewayDomain(
-                self.name,
-                subdomain=subdomain,
-                rest_api_id=self.rest_api.id,
-                stage_name=self.name,
-                hosted_zone_id=self.hosted_zone_id,
-                opts=pulumi.ResourceOptions(parent=self, depends_on=[stage]),
-            )
-            pulumi.export(f"{self.name}-custom-domain", custom_domain.domain_name)
-
-        self.register_outputs({"rest_api_id": self.rest_api.id})
-        log.info("REST API build completed")
-        return self.rest_api.id
-
-    def _create_stage(self):
-        # Create the API Gateway deployment.
+    def _create_stage(self, rest_api: aws.apigateway.RestApi) -> aws.apigateway.Stage:
+        """
+        Create the API Gateway stage.
+        """
         log.info("Creating API Gateway deployment")
         deployment = aws.apigateway.Deployment(
             f"{self.name}-deployment",
-            rest_api=self.rest_api.id,
-            opts=pulumi.ResourceOptions(parent=self, depends_on=[self.rest_api]),
+            rest_api=rest_api.id,
+            opts=pulumi.ResourceOptions(parent=self, depends_on=[rest_api]),
         )
 
-        # Create the API Gateway stage.
         log.info("Creating API Gateway stage")
         if self.logging:
             log.info("Setting up logging for API stage")
@@ -316,7 +331,7 @@ class RestAPI(pulumi.ComponentResource):
             )
             return aws.apigateway.Stage(
                 f"{self.name}-stage",
-                rest_api=self.rest_api.id,
+                rest_api=rest_api.id,
                 deployment=deployment.id,
                 stage_name=self.name,
                 access_log_settings={
@@ -345,14 +360,31 @@ class RestAPI(pulumi.ComponentResource):
             )
         return aws.apigateway.Stage(
             f"{self.name}-stage",
-            rest_api=self.rest_api.id,
-            description="Stage for API Gateway",
+            rest_api=rest_api.id,
             deployment=deployment.id,
             stage_name=self.name,
+            opts=pulumi.ResourceOptions(parent=self, depends_on=[deployment, rest_api]),
+        )
+
+    def create_custom_domain(self, hosted_zone_id: str, subdomain: str) -> str:
+
+        if not hosted_zone_id:
+            raise ValueError("Hosted zone ID is required for custom domain.")
+
+        subdomain = subdomain if subdomain else resource_id()
+
+        custom_domain = CustomGatewayDomain(
+            name=self.name,
+            hosted_zone_id=hosted_zone_id,
+            subdomain=subdomain,
+            rest_api_id=self.rest_api.id,
+            stage_name=self.stage.apply(lambda s: s.stage_name),
             opts=pulumi.ResourceOptions(
-                parent=self, depends_on=[deployment, self.rest_api]
+                parent=self, depends_on=[self.rest_api, self.stage]
             ),
         )
+
+        return custom_domain.domain_name
 
     def _create_lambda_permissions(self):
         """
@@ -378,15 +410,13 @@ class RestAPI(pulumi.ComponentResource):
             )
             permission_names.append(name)
 
-    def _create_cognito_permissions(self):
+    def _create_cognito_permissions(self, invoke_arns: list[str]):
         """
         Create permissions for API Gateway to access Cognito user pools.
         """
         log.info("Creating Cognito permissions for API Gateway")
         user_pool_arns = [
-            self.invoke_arns[
-                arn_slice["offset"] : arn_slice["offset"] + arn_slice["length"]
-            ]
+            invoke_arns[arn_slice["offset"] : arn_slice["offset"] + arn_slice["length"]]
             for arn_slice in self.arn_alloc
             if arn_slice["type"] == "pool-validator"
         ]
@@ -526,7 +556,7 @@ class RestAPI(pulumi.ComponentResource):
             if is_localstack_deployment()
             else "execute-api.us-east-1.amazonaws.com"
         )
-        return self.rest_api_id.apply(lambda api_id: f"{api_id}.{host}/{self.name}")
+        return self.rest_api.id.apply(lambda api_id: f"{api_id}.{host}/{self.name}")
 
 
 def rest_api(
