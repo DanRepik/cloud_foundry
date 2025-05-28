@@ -5,7 +5,6 @@ lambda_function = python_function(
     environment={
         "ENV": "production",
     },
-    runtime="python3.11",
     sources={
         "app.py": """
 import os

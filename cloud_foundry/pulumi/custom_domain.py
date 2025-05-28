@@ -5,6 +5,19 @@ from logging import getLogger
 
 log = getLogger(__name__)
 
+hosted_zones = {}
+
+
+def get_hosted_zone(hosted_zone_id: str) -> aws.route53.Zone:
+    """
+    Retrieve the hosted zone ID from the environment variable or create a new one.
+    """
+    if hosted_zone_id not in hosted_zones:
+        hosted_zones[hosted_zone_id] = aws.route53.Zone.get(
+            f"hosted-zone-{hosted_zone_id}", id=hosted_zone_id
+        )
+    return hosted_zones[hosted_zone_id]
+
 
 def domain_from_subdomain(
     name: str, subdomain: str, hosted_zone_id
@@ -13,8 +26,7 @@ def domain_from_subdomain(
         "Creating domain from subdomain:"
         + f" {subdomain} in hosted zone ID: {hosted_zone_id}"
     )
-    hosted_zone = aws.route53.Zone.get(f"{name}-hosted-zone", id=hosted_zone_id)
-    return pulumi.Output.concat(subdomain, ".", hosted_zone.name)
+    return pulumi.Output.concat(subdomain, ".", get_hosted_zone(hosted_zone_id).name)
 
 
 class CustomCertificate(pulumi.ComponentResource):
@@ -33,14 +45,12 @@ class CustomCertificate(pulumi.ComponentResource):
             f"{name}-cert", subdomain, hosted_zone_id
         )
 
-        alternative_names = [self.hosted_zone_name] if include_apex else []
+        alternative_names = (
+            [get_hosted_zone(hosted_zone_id).name] if include_apex else []
+        )
 
-        self.certificate = aws.acm.Certificate(
-            f"{name}-certificate",
-            domain_name=self.domain_name,
-            subject_alternative_names=alternative_names,
-            validation_method="DNS",
-            opts=ResourceOptions(parent=self),
+        self.certificate = pulumi.Output.all(self.domain_name, alternative_names).apply(
+            lambda args: self._create_certificate(name, args[0], args[1])
         )
 
         validation_options = self.certificate.domain_validation_options.apply(
@@ -69,6 +79,19 @@ class CustomCertificate(pulumi.ComponentResource):
                 validation_record_fqdns=[record.fqdn for record in records],
                 opts=ResourceOptions(parent=self),
             )
+        )
+
+    def _create_certificate(self, name: str, domain_name: str, alternative_names: list):
+        log.info(
+            f"Creating certificate for domain: {domain_name} "
+            + f"with alternative names: {alternative_names}"
+        )
+        return aws.acm.Certificate(
+            f"{name}-certificate",
+            domain_name=self.domain_name,
+            subject_alternative_names=alternative_names,
+            validation_method="DNS",
+            opts=ResourceOptions(parent=self),
         )
 
 
@@ -109,7 +132,7 @@ class CustomGatewayDomain(CustomCertificate):
         )
 
         # Define the DNS record
-        log.info(f"Creating DNS record for {name} with domain name: {self.domain_name}")
+        log.info(f"Creating DNS record for {name} with subdomain: {subdomain}")
         aws.route53.Record(
             f"{name}-dns-record",
             name=custom_domain.domain_name,

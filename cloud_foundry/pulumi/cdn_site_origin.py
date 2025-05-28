@@ -105,8 +105,6 @@ class SiteOrigin(pulumi.ComponentResource):
             opts=ResourceOptions(parent=self),
         )
 
-        # self.bucket.bucket_regional_domain_name.apply(lambda domain_name: log.info(f"bucket_regional_domain_name: {domain_name}"))
-
         self.distribution_origin = aws.cloudfront.DistributionOriginArgs(
             domain_name=self.bucket.bucket_regional_domain_name,
             origin_id=f"{self.name}-site",
@@ -132,7 +130,7 @@ class SiteOrigin(pulumi.ComponentResource):
 
     def create_policy(self, distiribution_id):
         # Create S3 Bucket Policy
-        bucket_policy = aws.s3.BucketPolicy(
+        aws.s3.BucketPolicy(
             f"{self.name}-bucket-policy",
             bucket=self.bucket.bucket,
             policy=pulumi.Output.all(

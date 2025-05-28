@@ -37,7 +37,7 @@ class RestAPI(pulumi.ComponentResource):
         cors_origins: Optional[str] = False,
         content: Optional[list[dict]] = None,
         token_validators: Optional[list[dict]] = None,
-        firewall: Optional[RestAPIFirewall] = None,
+        firewall: Optional[dict] = None,
         logging: Optional[bool] = False,
         path_prefix: Optional[str] = None,
         export_api: Optional[str] = None,
@@ -58,7 +58,7 @@ class RestAPI(pulumi.ComponentResource):
             the API spec.
             content (Optional[list[dict]], optional): List of static content
             definitions (e.g. S3 integrations).
-            firewall (Optional[RestAPIFirewall], optional): Addd WAF rules to the API.
+            firewall (Optional[dict], optional): Addd WAF rules to the API.
             logging (Optional[bool], optional): Enable API Gateway stage logging.
             path_prefix (Optional[str], optional): A prefix to prepend to
             all API paths.
@@ -92,6 +92,8 @@ class RestAPI(pulumi.ComponentResource):
         self.rest_api = pulumi.Output.all(*all_arns).apply(
             lambda resolved_arns: self._create_rest_api(resolved_arns)
         )
+        pulumi.export(f"{self.name}-rest-api-id", self.rest_api.id)
+        self.rest_api_id = self.rest_api.id
 
         # Create the API Gateway stage
         self.stage = self.rest_api.apply(lambda rest_api: self._create_stage(rest_api))
@@ -103,6 +105,7 @@ class RestAPI(pulumi.ComponentResource):
                     self.hosted_zone_id, self.subdomain
                 )
             )
+            pulumi.export(f"{self.name}-domain", self.domain)
 
         # Register outputs
         self.register_outputs(
@@ -225,7 +228,8 @@ class RestAPI(pulumi.ComponentResource):
             log.info(f"Processing ARN slice: {arn_slice}")
             if arn_slice["type"] == "integration":
                 log.info(
-                    f"Adding integration: {arn_slice['path']}, index: {arn_slice['offset']}"
+                    f"Adding integration: {arn_slice['path']}, "
+                    + f"index: {arn_slice['offset']}"
                 )
                 self.editor.add_integration(
                     path=arn_slice["path"],
@@ -371,7 +375,7 @@ class RestAPI(pulumi.ComponentResource):
         if not hosted_zone_id:
             raise ValueError("Hosted zone ID is required for custom domain.")
 
-        subdomain = subdomain if subdomain else resource_id()
+        subdomain = subdomain if subdomain else resource_id(self.name)
 
         custom_domain = CustomGatewayDomain(
             name=self.name,
@@ -568,7 +572,7 @@ def rest_api(
     content: list[dict] = None,
     hosted_zone_id: str = None,
     subdomain: str = None,
-    firewall: RestAPIFirewall = None,
+    firewall: dict = None,
     logging: Optional[bool] = False,
     path_prefix: Optional[str] = None,
     export_api: Optional[str] = None,
@@ -584,7 +588,7 @@ def rest_api(
         token_validators (list[dict], optional): List of token validators.
         cors_origins (str, optional): CORS setting.
         content (list[dict], optional): S3 content integrations.
-        firewall (RestAPIFirewall, optional): Firewall configuration.
+        firewall (dict, optional): Firewall configuration.
         logging (bool, optional): Enable API stage logging.
         path_prefix (str, optional): A prefix to prepend to all API paths.
         export_api (str, optional): Name to export the API details.

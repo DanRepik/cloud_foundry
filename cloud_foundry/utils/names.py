@@ -37,7 +37,7 @@ def region() -> str:
     return _region
 
 
-def resource_id(name: str) -> str:
+def resource_id(name: str = None) -> str:
     """
     Generate a standardized resource ID by combining the project name, stack name,
     and resource name.
@@ -50,4 +50,4 @@ def resource_id(name: str) -> str:
     """
     project = pulumi.get_project()
     stack = pulumi.get_stack()
-    return f"{project}-{stack}-{name}"
+    return f"{project}-{stack}{'-' + name if name else ''}"

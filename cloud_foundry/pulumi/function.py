@@ -71,6 +71,10 @@ class Function(pulumi.ComponentResource):
     def function_name(self) -> pulumi.Output[str]:
         return self.lambda_.name
 
+    @property
+    def log_group_name(self) -> pulumi.Output[str]:
+        return pulumi.Output.concat("/aws/lambda/", self.lambda_.name)
+
     def _create_lambda_function(self) -> aws.lambda_.Function:
         log.info(f"Creating Lambda function: {self._function_name}")
 
@@ -104,7 +108,7 @@ class Function(pulumi.ComponentResource):
         # Set the retention time for the function logs
         aws.cloudwatch.LogGroup(
             f"{self.name}-log-group",
-            name=f"/aws/lambda/{self._function_name}",
+            name=self.log_group_name,
             retention_in_days=3,  # Set the retention period in days
             opts=pulumi.ResourceOptions(parent=self.lambda_),
         )
@@ -114,6 +118,7 @@ class Function(pulumi.ComponentResource):
             {
                 "invoke_arn": self.lambda_.invoke_arn,
                 "function_name": self._function_name,
+                "log_group_name": f"/aws/lambda/{self._function_name}",
             }
         )
 
