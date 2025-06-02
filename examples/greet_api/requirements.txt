@@ -1,0 +1,8 @@
+pulumi
+pulumi-aws
+
+#cloud_foundry
+
+requrests
+
+-e ../..

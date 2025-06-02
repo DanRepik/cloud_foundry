@@ -16,11 +16,12 @@ class OpenAPISpecEditor:
         Initialize the class by loading the OpenAPI specification.
 
         Args:
-            spec (Union[str, List[str]]): A string representing a YAML content, a file path,
-                                          or a list of strings containing YAML contents or file paths.
+            spec (Union[str, List[str]]): A string representing a YAML content,
+            a file path, or a list of strings containing YAML contents or file paths.
         """
         self.openapi_spec = {}
         self._yaml = None
+        log.info("Initializing OpenAPISpecEditor")
 
         if isinstance(spec, dict):
             self.openapi_spec = spec
@@ -34,9 +35,10 @@ class OpenAPISpecEditor:
         """Merge a single OpenAPI spec into the current one."""
         # Check if the string is a file path to a YAML file
         if os.path.isfile(spec) and (spec.endswith(".yaml") or spec.endswith(".yml")):
+            log.info(f"Loading OpenAPI spec from file: {spec}")
             new_spec_dict = self._load_openapi_spec(spec)
         else:
-            log.info(f"Loading OpenAPI spec from string")
+            log.info("Loading OpenAPI spec from string")
             # Assume the string is YAML content and parse it
             new_spec_dict = yaml.safe_load(spec)
 
@@ -63,7 +65,8 @@ class OpenAPISpecEditor:
 
         Args:
             source (Dict[Any, Any]): The dictionary to merge into the destination.
-            destination (Dict[Any, Any]): The dictionary into which source will be merged.
+            destination (Dict[Any, Any]): The dictionary into which source will be
+            merged.
 
         Returns:
             Dict[Any, Any]: The merged dictionary.
@@ -72,7 +75,8 @@ class OpenAPISpecEditor:
             if isinstance(value, Mapping) and isinstance(destination.get(key), Mapping):
                 destination[key] = self._deep_merge(value, destination.get(key, {}))
             elif isinstance(value, list):
-                # Handle lists by replacing the value if the list in source is empty, otherwise merge lists
+                # Handle lists by replacing the value if the list in source is empty,
+                # otherwise merge lists
                 if not value:
                     destination[key] = value  # Override with empty list
                 elif key in destination and isinstance(destination[key], list):
@@ -86,10 +90,12 @@ class OpenAPISpecEditor:
 
     def get_or_create_spec_part(self, keys: List[str], create: bool = False) -> Any:
         """
-        Get a part of the OpenAPI spec based on a list of keys. Optionally create parts if they do not exist.
+        Get a part of the OpenAPI spec based on a list of keys. Optionally create
+        parts if they do not exist.
 
         Args:
-            keys (List[str]): A list of keys representing the path to the part of the spec.
+            keys (List[str]): A list of keys representing the path to the part of the
+            spec.
             create (bool): If True, create the parts if they do not exist.
 
         Returns:
@@ -144,7 +150,8 @@ class OpenAPISpecEditor:
             path (str): The API path.
             method (str): The HTTP method.
             operation (dict): The operation definition.
-            schema_object (Optional[dict]): The schema object to check for `x-af-security`.
+            schema_object (Optional[dict]): The schema object to check for
+            `x-af-security`.
         """
 
         # Check for `x-af-security` in the schema
@@ -190,7 +197,8 @@ class OpenAPISpecEditor:
 
     def remove_attributes_by_pattern(self, pattern: str) -> None:
         """
-        Remove all attributes in the OpenAPI specification that match the provided regex pattern.
+        Remove all attributes in the OpenAPI specification that match the
+        provided regex pattern.
 
         Args:
             pattern (str): A regex pattern to match keys in the OpenAPI spec.
@@ -217,11 +225,12 @@ class OpenAPISpecEditor:
 
     def merge_with(self, new_spec: Union[Dict, str]) -> "OpenAPISpecEditor":
         """
-        Merge another OpenAPI specification with the current one, with the new spec winning conflicts.
+        Merge another OpenAPI specification with the current one, with the new
+        spec winning conflicts.
 
         Args:
-            new_spec (Union[Dict, str]): The new OpenAPI specification to merge in. Can be a dictionary
-                                         or a string representing YAML content or a file path.
+            new_spec (Union[Dict, str]): The new OpenAPI specification to merge in.
+            Can be a dictionary or a string representing YAML content or a file path.
 
         Returns:
             OpenAPISpecEditor: Returns the instance for chaining.

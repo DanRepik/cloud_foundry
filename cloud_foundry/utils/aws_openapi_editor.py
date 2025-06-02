@@ -5,6 +5,8 @@ import re
 from typing import Union, Dict, List, Optional
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.openapi_editor import OpenAPISpecEditor
+import boto3
+import yaml
 
 log = logger(__name__)
 
@@ -12,7 +14,8 @@ log = logger(__name__)
 class AWSOpenAPISpecEditor(OpenAPISpecEditor):
     """
     A specialized OpenAPI specification editor for AWS API Gateway.
-    Provides utilities for managing integrations, CORS, schema corrections, and path operations.
+    Provides utilities for managing integrations, CORS, schema corrections,
+    and path operations.
     """
 
     def __init__(self, spec: Optional[Union[Dict, str, List[str]]]):
@@ -20,11 +23,26 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         Initialize the class by loading the OpenAPI specification.
 
         Args:
-            spec (Union[Dict, str, List[str]]): A dictionary containing the OpenAPI specification,
-                                                a string representing YAML content, or a file path.
+            spec (Union[Dict, str, List[str]]): A dictionary containing the
+                OpenAPI specification, a string representing YAML content,
+                or a file path.
         """
+        # If the spec is a list, resolve S3 URIs to their content
+        resolved_spec = None
+        if isinstance(spec, list):
+            resolved_spec = []
+            for item in spec:
+                if item.startswith("s3://"):
+                    bucket, key = item[5:].split("/", 1)
+                    s3_client = boto3.client("s3")
+                    response = s3_client.get_object(Bucket=bucket, Key=key)
+                    content = response["Body"].read().decode("utf-8")
+                    resolved_spec.append(content)
+                else:
+                    resolved_spec.append(item)
         super().__init__(
-            spec
+            resolved_spec
+            or spec
             or {
                 "openapi": "3.0.3",
                 "info": {
@@ -43,7 +61,8 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
 
         Args:
             name (str): The name for the token validator.
-            function_name (str): The name of the Lambda function to be used for validation.
+            function_name (str): The name of the Lambda function to be used
+                for validation.
             invoke_arn (str): The ARN of the Lambda function.
         """
         security_schemes = self.get_or_create_spec_part(
@@ -72,14 +91,13 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             name (str): The name for the token validator.
             user_pool_arns (List[str]): A list of Cognito User Pool ARNs.
         """
+        log.debug(f"Adding user pool validator: {name} with ARNs: {user_pool_arns}")
         security_schemes = self.get_or_create_spec_part(
             ["components", "securitySchemes"], create=True
         )
 
         security_schemes[name] = {
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header",
+            "type": "openIdConnect",
             "x-amazon-apigateway-authtype": "cognito_user_pools",
             "x-amazon-apigateway-authorizer": {
                 "type": "cognito_user_pools",
@@ -122,12 +140,14 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
         function_names: list[str],
     ):
         """
-        Process and add each integration to the OpenAPI spec using the resolved invoke ARNs and function names.
+        Process and add each integration to the OpenAPI spec using the resolved invoke
+        ARNs and function names.
 
         Args:
             integrations (list[dict]): List of integrations defined in the configuration.
             invoke_arns (list[str]): Resolved ARNs of the integration functions.
-            function_names (list[str]): Resolved function names of the integration functions.
+            function_names (list[str]): Resolved function names of the
+                integration functions.
         """
         for integration, invoke_arn, function_name in zip(
             integrations, invoke_arns, function_names
@@ -190,7 +210,8 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
 
     def correct_schema_names(self):
         """
-        Correct schema component names to strictly alphabetic characters and update all references accordingly.
+        Correct schema component names to strictly alphabetic characters and update
+        all references accordingly.
         """
         non_alphabetic_pattern = re.compile(r"[^a-zA-Z]")
         schemas = self.get_spec_part(["components", "schemas"], create=False)
@@ -223,6 +244,33 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                     update_refs(item)
 
         update_refs(self.openapi_spec)
+
+    def collect_function_names(self) -> List[str]:
+        """
+        Collect all 'x-function-name' attributes from the OpenAPI spec.
+
+        Returns:
+            List[str]: A list of all function names found in the OpenAPI spec.
+        """
+        function_names = set()
+        # Collect function names from paths
+        paths = self.get_spec_part(["paths"], create=False)
+        if paths:
+            for methods in paths.values():
+                for operation in methods.values():
+                    if isinstance(operation, dict) and "x-function-name" in operation:
+                        function_names.add(operation["x-function-name"])
+
+        # Collect function names from securitySchemes
+        security_schemes = self.get_spec_part(
+            ["components", "securitySchemes"], create=False
+        )
+        if security_schemes:
+            for scheme in security_schemes.values():
+                if isinstance(scheme, dict) and "x-function-name" in scheme:
+                    function_names.add(scheme["x-function-name"])
+
+        return list(function_names)
 
     def cors_origins(self, cors_origins: List[str]):
         """

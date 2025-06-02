@@ -1,9 +1,8 @@
 import pulumi
 import pulumi_aws as aws
-from typing import Union
+from typing import Optional
 from pulumi import ResourceOptions
 from cloud_foundry.utils.logger import logger
-from cloud_foundry.pulumi.rest_api import RestAPI
 
 log = logger(__name__)
 
@@ -11,7 +10,6 @@ log = logger(__name__)
 class ApiOriginArgs:
     def __init__(
         self,
-        rest_api: RestAPI = None,
         name: str = None,
         domain_name: str = None,
         path_pattern: str = None,
@@ -21,7 +19,6 @@ class ApiOriginArgs:
         is_target_origin: bool = False,
     ):
         self.name = name
-        self.rest_api = rest_api
         self.domain_name = domain_name
         self.path_pattern = path_pattern
         self.origin_path = origin_path
@@ -35,29 +32,38 @@ class ApiOrigin(pulumi.ComponentResource):
     Create an API origin for a CloudFront distribution.
 
     Args:
-        name: The name of the origin, must be unique within the scope of the CloudFront instance.
+        name: The name of the origin, must be unique within the scope of
+            the CloudFront instance.
         args: The API origin configuration arguments.
     """
 
-    def __init__(self, name: str, args: ApiOriginArgs, opts: ResourceOptions = None):
-        super().__init__(
-            "cloud_foundry:cdn:ApiOrigin", name or args.rest_api.name, {}, opts
-        )
+    def __init__(
+        self,
+        name: str,
+        *,
+        domain_name: str,
+        origin_path: Optional[str] = None,
+        path_pattern: str,
+        shield_region: Optional[str] = None,
+        api_key_password: Optional[str] = None,
+        opts: ResourceOptions = None,
+    ):
+        super().__init__("cloud_foundry:cdn:ApiOrigin", name, {}, opts)
 
-        self.origin_id = f"{name or args.rest_api.name}-api"
+        self.origin_id = f"{name}-api"
         log.info(f"Creating API origin with ID: {self.origin_id}")
 
         # Configure custom headers if API key is provided
         custom_headers = []
-        if args.api_key_password:
-            custom_headers.append({"name": "X-API-Key", "value": args.api_key_password})
+        if api_key_password:
+            custom_headers.append({"name": "X-API-Key", "value": api_key_password})
             log.debug("Custom headers configured for API key.")
 
         # Define the CloudFront distribution origin
         self.distribution_origin = aws.cloudfront.DistributionOriginArgs(
-            domain_name=args.domain_name,
+            domain_name=domain_name,
             origin_id=self.origin_id,
-            origin_path=args.origin_path,
+            origin_path=origin_path,
             custom_origin_config=aws.cloudfront.DistributionOriginCustomOriginConfigArgs(
                 http_port=80,
                 https_port=443,
@@ -66,12 +72,11 @@ class ApiOrigin(pulumi.ComponentResource):
             ),
             custom_headers=custom_headers,
         )
-        log.info(f"Distribution origin configured for domain: {args.domain_name}")
 
         # Define a custom origin request policy
-        custom_origin_request_policy = aws.cloudfront.OriginRequestPolicy(
-            f"{args.name}-request-policy",
-            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{args.name}-request-policy",
+        aws.cloudfront.OriginRequestPolicy(
+            f"{name}-request-policy",
+            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}-request-policy",
             cookies_config={
                 "cookie_behavior": "none",  # Do not forward cookies
             },
@@ -85,20 +90,20 @@ class ApiOrigin(pulumi.ComponentResource):
                 "query_string_behavior": "all",  # Forward all query strings
             },
         )
-        log.info(f"Custom origin request policy created for: {args.name}")
+        log.info(f"Custom origin request policy created for: {name}")
 
         # Configure Origin Shield if specified
-        if args.origin_shield_region:
+        if shield_region:
             self.distribution_origin.origin_shield = (
                 aws.cloudfront.DistributionOriginOriginShieldArgs(
-                    enabled=True, origin_shield_region=args.origin_shield_region
+                    enabled=True, origin_shield_region=shield_region
                 )
             )
-            log.info(f"Origin Shield enabled for region: {args.origin_shield_region}")
+            log.info(f"Origin Shield enabled for region: {shield_region}")
 
         # Define the cache behavior for the origin
         self.cache_behavior = aws.cloudfront.DistributionOrderedCacheBehaviorArgs(
-            path_pattern=args.path_pattern,
+            path_pattern=path_pattern,
             allowed_methods=[
                 "DELETE",
                 "GET",
@@ -122,7 +127,7 @@ class ApiOrigin(pulumi.ComponentResource):
             compress=True,
             viewer_protocol_policy="https-only",
         )
-        log.info(f"Cache behavior configured for path pattern: {args.path_pattern}")
+        log.info(f"Cache behavior configured for path pattern: {path_pattern}")
 
         # Register outputs
         self.register_outputs(

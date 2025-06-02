@@ -1,13 +1,19 @@
-build
-twine
-pytest
+
 pulumi
 pulumi-aws
+
+# testing packages
 pulumi-automation
-
 pytest
+pytest-cov
 requests
+boto3
+dotenv
+-e .
 
+# packaging packeges
 pre-commit
 flake8
 black
+build
+twine

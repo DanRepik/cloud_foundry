@@ -1,4 +1,5 @@
 import json
+from typing import Union
 import pulumi
 import pulumi_aws as aws
 from pulumi import ResourceOptions
@@ -9,22 +10,56 @@ from cloud_foundry.utils.logger import logger
 log = logger(__name__)
 
 
-class SiteOriginArgs:
+class OriginArgs:
     def __init__(
         self,
-        *,
-        bucket,
-        name: str,
+        name: str = None,
         origin_path: str = None,
         origin_shield_region: str = None,
         is_target_origin: bool = False,
     ):
-        self.bucket = bucket
         self.name = name
         self.origin_path = origin_path
         self.origin_shield_region = origin_shield_region
         self.is_target_origin = is_target_origin
-        self.origin_id = f"{name}-site"
+
+
+class ApiOriginArgs(OriginArgs):
+    def __init__(
+        self,
+        name: str = None,
+        domain_name: str = None,
+        path_pattern: str = None,
+        origin_path: str = None,
+        origin_shield_region: str = None,
+        is_target_origin: bool = False,
+    ):
+        super().__init__(
+            name=name,
+            origin_path=origin_path,
+            origin_shield_region=origin_shield_region,
+            is_target_origin=is_target_origin,
+        )
+        self.domain_name = domain_name
+        self.path_pattern = path_pattern
+
+
+class SiteOriginArgs(OriginArgs):
+    def __init__(
+        self,
+        name: str,
+        bucket: Union[SiteBucket, aws.s3.Bucket, str] = None,
+        origin_path: str = None,
+        origin_shield_region: str = None,
+        is_target_origin: bool = False,
+    ):
+        super().__init__(
+            name=name,
+            origin_shield_region=origin_shield_region,
+            is_target_origin=is_target_origin,
+        )
+        self.bucket = bucket
+        self.origin_path = origin_path
 
 
 class SiteOrigin(pulumi.ComponentResource):
@@ -36,16 +71,26 @@ class SiteOrigin(pulumi.ComponentResource):
     :return: The CloudFront distribution origin.
     """
 
-    def __init__(self, name: str, args: SiteOriginArgs, opts: ResourceOptions = None):
+    def __init__(
+        self,
+        name: str,
+        bucket: Union[SiteBucket, aws.s3.Bucket, str],
+        origin_path: str = None,
+        origin_shield_region: str = None,
+        opts: ResourceOptions = None,
+    ):
         super().__init__("cloud_foundry:pulumi:SiteOrigin", name, {}, opts)
 
         self.name = name
         # Determine the bucket type and extract the necessary
-        if isinstance(args.bucket, aws.s3.Bucket):
-            self.bucket = args.bucket
-        elif isinstance(args.bucket, SiteBucket):
-            self.bucket = args.bucket.bucket
-        else:
+        if isinstance(bucket, aws.s3.Bucket):
+            self.bucket = bucket
+        elif isinstance(bucket, SiteBucket):
+            self.bucket = bucket.bucket
+        elif isinstance(bucket, str):
+            self.bucket = aws.s3.Bucket.get(bucket, bucket)
+
+        if self.bucket is None:
             raise ValueError(
                 "Invalid bucket type. Must be either aws.s3.Bucket or SiteBucket."
             )
@@ -60,22 +105,20 @@ class SiteOrigin(pulumi.ComponentResource):
             opts=ResourceOptions(parent=self),
         )
 
-        self.bucket.bucket_regional_domain_name.apply(lambda domain_name: log.info(f"bucket_regional_domain_name: {domain_name}"))
-
         self.distribution_origin = aws.cloudfront.DistributionOriginArgs(
             domain_name=self.bucket.bucket_regional_domain_name,
             origin_id=f"{self.name}-site",
             origin_access_control_id=origin_access_control.id,
-            origin_path=args.origin_path,
+            origin_path=origin_path,
             s3_origin_config=aws.cloudfront.DistributionOriginS3OriginConfigArgs(
                 origin_access_identity=""
             ),
         )
 
-        if args.origin_shield_region:
+        if origin_shield_region:
             self.distribution_origin.origin_shield = (
                 aws.cloudfront.DistributionOriginOriginShieldArgs(
-                    enabled=True, origin_shield_region=args.origin_shield_region
+                    enabled=True, origin_shield_region=origin_shield_region
                 )
             )
 
@@ -84,32 +127,33 @@ class SiteOrigin(pulumi.ComponentResource):
 
     def create_distribution_origin(self):
         return self.distribution_origin
-    
+
     def create_policy(self, distiribution_id):
         # Create S3 Bucket Policy
-        bucket_policy = aws.s3.BucketPolicy(
+        aws.s3.BucketPolicy(
             f"{self.name}-bucket-policy",
             bucket=self.bucket.bucket,
-            policy=pulumi.Output.all(self.bucket.arn, distiribution_id, aws.get_caller_identity().account_id).apply(
-            lambda args: json.dumps(
-                {
-                "Version": "2012-10-17",
-                "Statement": [
+            policy=pulumi.Output.all(
+                self.bucket.arn, distiribution_id, aws.get_caller_identity().account_id
+            ).apply(
+                lambda args: json.dumps(
                     {
-                    "Effect": "Allow",
-                    "Principal": {"Service": "cloudfront.amazonaws.com"},
-                    "Action": "s3:GetObject",
-                    "Resource": f"{args[0]}/*",
-                    "Condition": {
-                        "StringEquals": {
-                        "AWS:SourceArn": f"arn:aws:cloudfront::{args[2]}:distribution/{args[1]}"
-                        }
-                    },
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Effect": "Allow",
+                                "Principal": {"Service": "cloudfront.amazonaws.com"},
+                                "Action": "s3:GetObject",
+                                "Resource": f"{args[0]}/*",
+                                "Condition": {
+                                    "StringEquals": {
+                                        "AWS:SourceArn": f"arn:aws:cloudfront::{args[2]}:distribution/{args[1]}"
+                                    }
+                                },
+                            }
+                        ],
                     }
-                ],
-                }
-            )
+                )
             ),
             opts=ResourceOptions(parent=self),
         )
-

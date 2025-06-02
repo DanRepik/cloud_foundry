@@ -17,6 +17,7 @@ requires-python = ">=3.9"
 dependencies = [
     "pulumi",
     "pulumi-aws",
+    "boto3",
 ]
 classifiers = [
     "Programming Language :: Python :: 3.9",

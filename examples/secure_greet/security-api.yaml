@@ -1,0 +1,259 @@
+components:
+  schemas:
+    LoginRequest:
+      properties:
+        password:
+          example: Password123!
+          type: string
+        username:
+          example: johndoe
+          type: string
+      type: object
+    LogoutRequest:
+      properties:
+        access_token:
+          example: eyJraWQiOiJr...
+          type: string
+      type: object
+    RefreshTokenRequest:
+      properties:
+        refresh_token:
+          example: eyJraWQiOiJr...
+          type: string
+      type: object
+    RefreshTokenResponse:
+      properties:
+        access_token:
+          example: eyJraWQiOiJr...
+          type: string
+        groups:
+          example:
+          - admin
+          - user
+          items:
+            type: string
+          type: array
+        id_token:
+          example: eyJraWQiOiJr...
+          type: string
+        refresh_token:
+          example: eyJraWQiOiJr...
+          type: string
+      type: object
+    SignupRequest:
+      properties:
+        email:
+          example: johndoe@example.com
+          type: string
+        password:
+          example: Password123!
+          type: string
+        username:
+          example: johndoe
+          type: string
+      type: object
+  securitySchemes:
+    auth:
+      in: header
+      name: Authorization
+      type: apiKey
+      x-amazon-apigateway-authorizer:
+        authorizerResultTtlInSeconds: 60
+        authorizerUri: arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:905242188214:function:security_services-dev-token-validator/invocations
+        identitySource: method.request.header.Authorization
+        type: token
+      x-amazon-apigateway-authtype: custom
+      x-function-name: security_services-dev-token-validator
+info:
+  description: API for basic authorization services including signup, login, logout,
+    and token refresh.
+  title: Authorization Services API
+  version: 1.0.0
+openapi: 3.0.0
+paths:
+  /login:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                password:
+                  example: Password123!
+                  type: string
+                username:
+                  example: johndoe
+                  type: string
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                properties:
+                  access_token:
+                    example: eyJraWQiOiJr...
+                    type: string
+                  id_token:
+                    example: eyJraWQiOiJr...
+                    type: string
+                  refresh_token:
+                    example: eyJraWQiOiJr...
+                    type: string
+                type: object
+          description: Login successful
+        '400':
+          content:
+            application/json:
+              schema:
+                properties:
+                  message:
+                    example: An error occurred
+                    type: string
+                type: object
+          description: Login failed
+      security: []
+      summary: Login a user
+      x-amazon-apigateway-integration:
+        httpMethod: POST
+        type: aws_proxy
+        uri: arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:905242188214:function:security_services-dev-security_function/invocations
+      x-function-name: security_services-dev-security_function
+  /logout:
+    post:
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                properties:
+                  message:
+                    example: Logout successful
+                    type: string
+                type: object
+          description: Logout successful
+        '400':
+          content:
+            application/json:
+              schema:
+                properties:
+                  message:
+                    example: An error occurred
+                    type: string
+                type: object
+          description: Logout failed
+      security:
+      - auth: []
+      summary: Logout a user
+      x-amazon-apigateway-integration:
+        httpMethod: POST
+        type: aws_proxy
+        uri: arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:905242188214:function:security_services-dev-security_function/invocations
+      x-function-name: security_services-dev-security_function
+  /refresh-token:
+    post:
+      description: Refresh the access token and optionally the refresh token using
+        the provided refresh token.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                refresh_token:
+                  example: eyJraWQiOiJr...
+                  type: string
+                username:
+                  example: johndoe
+                  type: string
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                properties:
+                  access_token:
+                    example: eyJraWQiOiJr...
+                    type: string
+                  groups:
+                    example:
+                    - admin
+                    - user
+                    items:
+                      type: string
+                    type: array
+                  id_token:
+                    example: eyJraWQiOiJr...
+                    type: string
+                  refresh_token:
+                    example: eyJraWQiOiJr...
+                    type: string
+                type: object
+          description: Token refresh successful
+        '400':
+          content:
+            application/json:
+              schema:
+                properties:
+                  message:
+                    example: An error occurred
+                    type: string
+                type: object
+          description: Token refresh failed
+      summary: Refresh tokens
+      x-amazon-apigateway-integration:
+        httpMethod: POST
+        type: aws_proxy
+        uri: arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:905242188214:function:security_services-dev-security_function/invocations
+      x-function-name: security_services-dev-security_function
+  /signup:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                email:
+                  example: johndoe@example.com
+                  type: string
+                nickName:
+                  example: Jon D
+                  type: string
+                password:
+                  example: Password123!
+                  type: string
+                username:
+                  example: johndoe
+                  type: string
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                properties:
+                  message:
+                    example: Signup successful
+                    type: string
+                type: object
+          description: Signup successful
+        '400':
+          content:
+            application/json:
+              schema:
+                properties:
+                  error:
+                    example: An error occurred
+                    type: string
+                type: object
+          description: Signup failed
+      security: []
+      summary: Signup a new user
+      x-amazon-apigateway-integration:
+        httpMethod: POST
+        type: aws_proxy
+        uri: arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:905242188214:function:security_services-dev-security_function/invocations
+      x-function-name: security_services-dev-security_function
