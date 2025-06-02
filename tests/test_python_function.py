@@ -4,33 +4,30 @@ import pytest
 import logging
 import boto3
 import json
-from cloud_foundry import python_function
+import cloud_foundry
 
 log = logging.getLogger(__name__)
 
 
 # Define the Pulumi program
-def define_pulumi_program():
+def simple_function_deployment():
     def pulumi_program():
-        test_function = python_function(
+        test_function = cloud_foundry.python_function(
             name="test-function",
             environment={
                 "ENV": "production",
             },
             sources={
                 "app.py": """
-import os
 import json
 
-def handler(event, context):
+def handler(event, _):
+    name = (event.get("queryStringParameters") or {}).get("name", "World")
+
     return {
-        'statusCode': 200,
-        'body': json.dumps({
-            'message': f\"Hello from {os.environ.get('ENV', 'unknown')}!\"
-        }),
-        'headers': {
-            'Content-Type': 'application/json'
-        }
+        "statusCode": 200,
+        "body": json.dumps({"message": f"Hello, {name}!"}),
+        "headers": {"Content-Type": "application/json"},
     }
 """,
             },
@@ -41,14 +38,7 @@ def handler(event, context):
     return pulumi_program
 
 
-@pytest.fixture
-def pulumi_stack():
-    # Set up the Pulumi project and stack
-    project_name = "cloud_foundry"
-    stack_name = "test-python-function"
-    pulumi_program = define_pulumi_program()
-
-    # Create or select the stack
+def deploy_stack(project_name, stack_name, pulumi_program):
     stack = auto.create_or_select_stack(
         stack_name=stack_name,
         project_name=project_name,
@@ -59,65 +49,81 @@ def pulumi_stack():
         print("Deploying Pulumi stack...")
         up_result = stack.up()
         print(f"Deployment complete: {up_result.summary.resource_changes}")
+
         yield stack, up_result.outputs
     finally:
-        # Destroy the stack
         print("Destroying Pulumi stack...")
         stack.destroy()
         print("Stack destroyed.")
 
-        # Remove the stack
         stack.workspace.remove_stack(stack_name)
 
 
-def invoke_lambda_function(function_name, payload=None):
-    """
-    Invokes an AWS Lambda function using boto3.
+def deploy_stack_no_teardown(project_name, stack_name, pulumi_program):
+    # Create or select the stack
+    stack = auto.create_or_select_stack(
+        stack_name=stack_name,
+        project_name=project_name,
+        program=pulumi_program,
+    )
+    # Deploy the stack
+    print("Deploying Pulumi stack...")
+    up_result = stack.up()
+    print(f"Deployment complete: {up_result.summary.resource_changes}")
 
-    :param function_name: The name of the Lambda function to invoke.
-    :param payload: A dictionary containing the payload to send to the Lambda function.
-    :return: The response from the Lambda function.
-    """
-    log.info("Invoking Lambda function")
-    # Create a Lambda client
-    lambda_client = boto3.client("lambda")
-
-    try:
-        # Invoke the Lambda function
-        response = lambda_client.invoke(
-            FunctionName=function_name,
-            InvocationType="RequestResponse",  # Synchronous invocation
-            Payload=json.dumps(payload or {}),
-        )
-
-        log.info(f"Lambda function invoked successfully: {response}")
-        assert (
-            response["StatusCode"] == 200
-        ), f"Error invoking Lambda function: {response['FunctionError']}"
-
-        log.info(f"payload: {response['Payload']}")
-        # Read and decode the response payload
-        response_payload = json.loads(response["Payload"].read().decode("utf-8"))
-
-        print(f"Lambda function '{function_name}' invoked successfully.")
-        return response_payload
-
-    except Exception as e:
-        print(f"Error invoking Lambda function '{function_name}': {e}")
-        return None
+    yield stack, up_result.outputs
 
 
-def test_deploy_and_validate(pulumi_stack):
-    stack, outputs = pulumi_stack
+@pytest.fixture
+def simple_function_stack():
+    yield from deploy_stack("cf-test", "simple-func", simple_function_deployment())
+
+
+def test_simple_function(simple_function_stack):
+    stack, outputs = simple_function_stack
 
     # Validate the deployed service
     invoke_url = outputs.get("invoke_url").value
     assert invoke_url is not None, "Invoke URL is missing."
 
-    # Example: Make an HTTP request to the distribution
-    response = invoke_lambda_function(invoke_url)
-    log.info(f"Response from Lambda function: {response}")
+    # Create a Lambda client
+    lambda_client = boto3.client("lambda")
+
+    # Example payload
+    payload = {"queryStringParameters": {"name": "World"}}
+
+    # Invoke the Lambda function
+    response = lambda_client.invoke(
+        FunctionName=invoke_url,
+        InvocationType="RequestResponse",  # Synchronous invocation
+        Payload=json.dumps(payload),
+    )
+    log.info(f"Lambda response: {response}")
     assert (
-        response["statusCode"] == 200
-    ), f"Unexpected status code: {response['statusCode']}"
-    assert "Hello from production!" in response["body"], "Unexpected response body."
+        response["StatusCode"] == 200
+    ), f"Error invoking Lambda function: {response.get('FunctionError')}"
+
+    # Read and decode the response payload
+    response_payload = json.loads(response["Payload"].read().decode("utf-8"))
+    log.info(f"Response payload: {response_payload}")
+    assert "Hello, World!" in response_payload["body"], "Unexpected response body."
+
+    # Invoke the Lambda function
+    # To pass the name as a query string parameter, update the payload accordingly
+    payload = {"queryStringParameters": {"name": "Alice"}}
+
+    # test with a query string parameter
+    response = lambda_client.invoke(
+        FunctionName=invoke_url,
+        InvocationType="RequestResponse",  # Synchronous invocation
+        Payload=json.dumps(payload),
+    )
+
+    assert (
+        response["StatusCode"] == 200
+    ), f"Error invoking Lambda function: {response.get('FunctionError')}"
+
+    # Read and decode the response payload
+    response_payload = json.loads(response["Payload"].read().decode("utf-8"))
+    log.info(f"Response payload: {response_payload}")
+    assert "Hello, Alice!" in response_payload["body"], "Unexpected response body."

@@ -6,6 +6,7 @@ import requests
 import os
 import dotenv
 from cloud_foundry import python_function, rest_api
+from tests.resources.security_services.security_pulumi import SecurityAPI
 
 log = logging.getLogger(__name__)
 dotenv.load_dotenv()
@@ -35,13 +36,17 @@ def simple_greet_api():
     return pulumi_program
 
 
-@pytest.fixture
-def simple_greet_stack():
-    # Set up the Pulumi project and stack
-    project_name = "cf"
-    stack_name = "test"
-    pulumi_program = simple_greet_api()
+def security_services_pulumi():
+    def pulumi_program():
+        security_api = SecurityAPI("security-api")
 
+        pulumi.export("security-api-host", security_api.api.domain)
+        pulumi.export("token-validator", security_api.token_validator.function_name)
+
+    return pulumi_program
+
+
+def deploy_stack(project_name, stack_name, pulumi_program):
     # Create or select the stack
     stack = auto.create_or_select_stack(
         stack_name=stack_name,
@@ -53,6 +58,7 @@ def simple_greet_stack():
         print("Deploying Pulumi stack...")
         up_result = stack.up()
         print(f"Deployment complete: {up_result.summary.resource_changes}")
+
         yield stack, up_result.outputs
     finally:
         print("Destroying Pulumi stack...")
@@ -60,6 +66,33 @@ def simple_greet_stack():
         print("Stack destroyed.")
 
         stack.workspace.remove_stack(stack_name)
+
+
+def deploy_pulumi_stack_no_teardown(project_name, stack_name, pulumi_program):
+    # Create or select the stack
+    stack = auto.create_or_select_stack(
+        stack_name=stack_name,
+        project_name=project_name,
+        program=pulumi_program,
+    )
+    # Deploy the stack
+    print("Deploying Pulumi stack...")
+    up_result = stack.up()
+    print(f"Deployment complete: {up_result.summary.resource_changes}")
+
+    yield stack, up_result.outputs
+
+
+@pytest.fixture
+def simple_greet_stack():
+    yield from deploy_stack("cf", "greet", simple_greet_api())
+
+
+@pytest.fixture
+def security_services_stack():
+    yield from deploy_pulumi_stack_no_teardown(
+        "cf", "security", security_services_pulumi()
+    )
 
 
 def test_no_auth(simple_greet_stack):
@@ -86,3 +119,21 @@ def test_no_auth(simple_greet_stack):
     assert (
         "Hello, Bob!" in response.text
     ), "Expected response body to contain 'Hello World!'"
+
+
+def test_security_services(security_services_stack):
+    stack, outputs = security_services_stack
+
+    # Validate the deployed service
+    log.info(f"outputs: {outputs}")
+    domain = outputs.get("security-api-host").value
+    log.info(f"domain: {domain}")
+    assert domain is not None, "Invoke URL is missing."
+
+    # test login
+    payload = {"username": "johndoe", "password": "Password123!"}
+    response = requests.post(f"https://{domain}/login", json=payload)
+    print("Login:", response.status_code, response.json())
+    assert response.status_code == 200
+
+    assert False

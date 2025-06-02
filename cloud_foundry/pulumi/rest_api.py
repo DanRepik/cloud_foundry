@@ -239,7 +239,8 @@ class RestAPI(pulumi.ComponentResource):
                 )
             elif arn_slice["type"] == "token-validator":
                 log.info(
-                    f"Adding validator: {arn_slice['name']}, index: {arn_slice['offset']}"
+                    f"Adding validator: {arn_slice['name']}, " 
+                    + f"index: {arn_slice['offset']}"
                 )
                 self.editor.add_token_validator(
                     name=arn_slice["name"],
@@ -292,9 +293,7 @@ class RestAPI(pulumi.ComponentResource):
                     file.write(self.editor.yaml)
                 log.info(f"API specification exported to file: {self.export_api}")
 
-        # Write the updated OpenAPI spec to a file for logging or debugging.
-        write_logging_file(f"{self.name}.yaml", self.editor.yaml)
-        return self.editor.yaml
+        self.api_spec = self.editor.yaml
 
     def _create_rest_api(self, invoke_arns: list[str]) -> aws.apigateway.RestApi:
         """
