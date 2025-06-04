@@ -121,28 +121,31 @@ def login(event):
 
 
 def logout(event):
-    headers = event.get("headers", {})
-    log.info(f"Processing logout request with headers: {headers}")
-    authorization_header = headers.get("Authorization")
-
-    if not authorization_header:
-        log.error("Authorization header is missing")
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"message": "Authorization header is required"}),
-        }
-
-    access_token = (
-        authorization_header.split(" ")[1]
-        if " " in authorization_header
-        else authorization_header
-    )
-    log.info(f"Logout request received with access_token: {access_token}")
-
-    if not access_token:
-        return {"statusCode": 200, "body": json.dumps({"message": "Logout successful"})}
-
     try:
+        headers = event.get("headers", {})
+        log.info(f"Processing logout request with headers: {headers}")
+        authorization_header = headers.get("Authorization")
+
+        if not authorization_header:
+            log.error("Authorization header is missing")
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"message": "Authorization header is required"}),
+            }
+
+        access_token = (
+            authorization_header.split(" ")[1]
+            if " " in authorization_header
+            else authorization_header
+        )
+        log.info(f"Logout request received with access_token: {access_token}")
+
+        if not access_token:
+            return {
+                "statusCode": 200,
+                "body": json.dumps({"message": "Logout successful"}),
+            }
+
         response = cognito_client.global_sign_out(AccessToken=access_token)
         log.info(f"Logout response: {response}")
         if response["ResponseMetadata"]["HTTPStatusCode"] != 200:

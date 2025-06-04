@@ -74,12 +74,12 @@ def deploy_stack_no_teardown(project_name, stack_name, pulumi_program):
     yield stack, up_result.outputs
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def simple_function_stack():
     yield from deploy_stack("cf-test", "simple-func", simple_function_deployment())
 
 
-def test_simple_function(simple_function_stack):
+def test_simple(simple_function_stack):
     stack, outputs = simple_function_stack
 
     # Validate the deployed service
@@ -107,6 +107,17 @@ def test_simple_function(simple_function_stack):
     response_payload = json.loads(response["Payload"].read().decode("utf-8"))
     log.info(f"Response payload: {response_payload}")
     assert "Hello, World!" in response_payload["body"], "Unexpected response body."
+
+
+def test_with_param(simple_function_stack):
+    stack, outputs = simple_function_stack
+
+    # Validate the deployed service
+    invoke_url = outputs.get("invoke_url").value
+    assert invoke_url is not None, "Invoke URL is missing."
+
+    # Create a Lambda client
+    lambda_client = boto3.client("lambda")
 
     # Invoke the Lambda function
     # To pass the name as a query string parameter, update the payload accordingly

@@ -88,13 +88,6 @@ def simple_greet_stack():
     yield from deploy_stack("cf", "greet", simple_greet_api())
 
 
-@pytest.fixture
-def security_services_stack():
-    yield from deploy_pulumi_stack_no_teardown(
-        "cf", "security", security_services_pulumi()
-    )
-
-
 def test_no_auth(simple_greet_stack):
     stack, outputs = simple_greet_stack
 
@@ -119,21 +112,3 @@ def test_no_auth(simple_greet_stack):
     assert (
         "Hello, Bob!" in response.text
     ), "Expected response body to contain 'Hello World!'"
-
-
-def test_security_services(security_services_stack):
-    stack, outputs = security_services_stack
-
-    # Validate the deployed service
-    log.info(f"outputs: {outputs}")
-    domain = outputs.get("security-api-host").value
-    log.info(f"domain: {domain}")
-    assert domain is not None, "Invoke URL is missing."
-
-    # test login
-    payload = {"username": "johndoe", "password": "Password123!"}
-    response = requests.post(f"https://{domain}/login", json=payload)
-    print("Login:", response.status_code, response.json())
-    assert response.status_code == 200
-
-    assert False

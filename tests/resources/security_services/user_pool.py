@@ -1,4 +1,3 @@
-import pulumi
 import pulumi_aws as aws
 from pulumi import ComponentResource, ResourceOptions
 from cloud_foundry.utils.names import resource_id
@@ -10,7 +9,7 @@ class UserPool(ComponentResource):
         name,
         self_serve: bool = True,
         attributes: list[str] = None,
-        groups: dict = None,
+        groups: list = None,
         opts=None,
     ):
         super().__init__("cloud_foundry:user_pool:Domain", name, {}, opts)
@@ -38,11 +37,11 @@ class UserPool(ComponentResource):
             },
             admin_create_user_config={
                 # Allow users to sign up themselves
-                "allow_admin_create_user_only": not self_serve  
+                "allow_admin_create_user_only": not self_serve
             },
             verification_message_template={
                 "default_email_option": "CONFIRM_WITH_LINK",
-                "email_message_by_link": "Click the link below to verify your email address:\n{##Verify Email##}", #noqa e501
+                "email_message_by_link": "Click the link below to verify your email address:\n{##Verify Email##}",  # noqa e501
                 "email_subject_by_link": "Verify your email",
             },
             email_configuration={"email_sending_account": "COGNITO_DEFAULT"},
@@ -63,13 +62,13 @@ class UserPool(ComponentResource):
             opts=ResourceOptions(parent=self),
         )
 
-        for group_name, group_description in (groups or {}).items():
+        for group in groups or []:
             # Create User Pool Groups with specified names and descriptions
             aws.cognito.UserGroup(
-                f"{name}-{group_name}-group",
+                f"{name}-{group["role"]}-group",
                 user_pool_id=user_pool.id,
-                name=group_name,
-                description=group_description,
+                name=group["role"],
+                description=group["description"],
                 opts=ResourceOptions(parent=self),
             )
 
@@ -78,11 +77,11 @@ class UserPool(ComponentResource):
         self.client_id = user_pool_client.id
         self.client_secret = user_pool_client.client_secret
 
-        pulumi.register_outputs(
+        self.register_outputs(
             {
-                "user_pool_id": self.id,
-                "user_pool_arn": self.arn,
-                "user_pool_client_id": self.client_id,
-                "user_pool_client_secret": self.client_secret,
+                "id": self.id,
+                "arn": self.arn,
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
             }
         )

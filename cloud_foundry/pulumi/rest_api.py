@@ -1,6 +1,7 @@
 # rest_api.py
 
 import json
+import os
 import pulumi
 import pulumi_aws as aws
 from typing import Optional, Union
@@ -105,13 +106,23 @@ class RestAPI(pulumi.ComponentResource):
                     self.hosted_zone_id, self.subdomain
                 )
             )
-            pulumi.export(f"{self.name}-domain", self.domain)
+        else:
+            # Set domain to the default execute-api endpoint
+            self.domain = pulumi.Output.concat(
+                self.rest_api.id,
+                ".execute-api.",
+                os.getenv("AWS_REGION") or aws.get_region().name,
+                ".amazonaws.com/",
+                self.stage.stage_name,
+            )
+        #        pulumi.export(f"{self.name}-domain", self.domain)
 
+        log.info(f"registering outputs for {self.name} API")
         # Register outputs
         self.register_outputs(
             {
-                "rest_api_id": self.rest_api.apply(lambda r: r.id),
-                "stage_name": self.stage.apply(lambda s: s.stage_name),
+                "rest_api_id": self.rest_api.id,
+                "stage_name": self.stage.stage_name,
             }
         )
 
@@ -239,7 +250,7 @@ class RestAPI(pulumi.ComponentResource):
                 )
             elif arn_slice["type"] == "token-validator":
                 log.info(
-                    f"Adding validator: {arn_slice['name']}, " 
+                    f"Adding validator: {arn_slice['name']}, "
                     + f"index: {arn_slice['offset']}"
                 )
                 self.editor.add_token_validator(
@@ -575,6 +586,7 @@ def rest_api(
     logging: Optional[bool] = False,
     path_prefix: Optional[str] = None,
     export_api: Optional[str] = None,
+    opts: Optional[pulumi.ResourceOptions] = None,
 ):
     """
     Helper function to create and configure a REST API using the RestAPI component.
@@ -609,7 +621,7 @@ def rest_api(
         logging=logging,
         path_prefix=path_prefix,
         export_api=export_api,
-        opts=None,
+        opts=opts,
     )
     log.info("REST API built successfully")
 

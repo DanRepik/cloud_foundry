@@ -1,8 +1,6 @@
 # Streamlining AWS Lambda Deployment with `python_function`
 
-When deploying cloud-native applications, managing Lambda functions often becomes a tangle of zipping files, configuring permissions, and handling packaging nuances. The `python_function` utility comes from Cloud Foundry, which is curated toolkit of components built to simplify cloud-centric application development. Think of it as a modular collection of building blocks—each one purpose-built to help build cloud centric applications faster. With `python_function`, what used to be a mess of manual steps becomes a clean, declarative experience.
-
----
+When deploying cloud-native applications, managing Lambda functions often becomes a tangle of zipping files, configuring permissions, and handling packaging nuances. Cloud Foundry, which is curated modular collection of building blocks designed to build cloud centric applications  With `python_function`, what used to be a mess of parts becomes a clean, declarative experience.
 
 ## Why Deployment Gets Messy
 
@@ -29,12 +27,12 @@ The `python_function` component abstracts the boilerplate away, offering a clean
 
 All in one step.
 
-### 🧱 Minimal Example
+### Minimal Example
 
 Here's a complete Lambda deployment in just a few lines of code:
 
 ```python
-from cloud_foundry import python_function
+import cloud_foundry
 
 lambda_function = cloud_foundry.python_function(
     name="example-function",

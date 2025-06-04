@@ -10,6 +10,7 @@ load_dotenv()
 class SecurityAPI(pulumi.ComponentResource):
     def __init__(self, name, user_pool_id, client_id, client_secret, opts=None):
         super().__init__("cloud_foundry:api:SecurityAPI", name, {}, opts)
+        source_dir = "./tests/resources/security_services"
 
         # Helper to get region/account/user pool
         region = os.getenv("AWS_REGION") or aws.get_region().name
@@ -25,12 +26,13 @@ class SecurityAPI(pulumi.ComponentResource):
         # Security Lambda
         self.security_function = cloud_foundry.python_function(
             "security-function",
-            sources={"app.py": "security_lambda.py"},
+            sources={"app.py": f"{source_dir}/security_lambda.py"},
             environment={
                 "CLIENT_ID": client_id,
                 "USER_POOL_ID": user_pool_id,
                 "CLIENT_SECRET": client_secret,
                 "ISSUER": get_issuer(),
+                "LOGGING_LEVEL": "DEBUG",
             },
             requirements=["pyjwt", "requests", "cryptography"],
             policy_statements=[
@@ -64,7 +66,7 @@ class SecurityAPI(pulumi.ComponentResource):
         # Token Validator Lambda
         self.token_validator = cloud_foundry.python_function(
             "token-validator",
-            sources={"app.py": "token_validator.py"},
+            sources={"app.py": f"{source_dir}/token_validator.py"},
             requirements=["pyjwt", "requests", "cryptography"],
             environment={"ISSUER": get_issuer()},
             opts=pulumi.ResourceOptions(parent=self),
@@ -112,6 +114,9 @@ class SecurityAPI(pulumi.ComponentResource):
             export_api="./temp/security-services-api.yaml",
             opts=pulumi.ResourceOptions(parent=self),
         )
+
+        self.domain = self.api.domain
+        self.token_validator = self.token_validator
 
         self.register_outputs(
             {
