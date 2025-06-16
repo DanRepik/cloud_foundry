@@ -9,6 +9,7 @@ pytest-cov
 requests
 boto3
 dotenv
+jwt
 -e .
 
 # packaging packeges

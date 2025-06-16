@@ -10,7 +10,7 @@ log.setLevel(os.environ.get("LOGGING_LEVEL", "DEBUG"))
 
 # Load environment variables
 AUTH_MAPPINGS = json.loads(os.getenv("AUTH0_AUTH_MAPPINGS", "{}"))
-DEFAULT_ARN = "arn:aws:execute-api:*:*:*/*/*"
+DEFAULT_ARN = "arn:aws:execute-api:*:*:*/*/*/*"
 
 # Cognito user pool issuer URL
 ISSUER = os.getenv(
@@ -25,11 +25,13 @@ def handler(event, context):
         token = parse_token_from_event(check_event_for_error(event))
         decoded_token = decode_token(event, token)
         log.info(f"Decoded token: {decoded_token}")
-        return get_policy(
-            build_policy_resource_base(event),
+        policy = get_policy(
+            event["methodArn"],
             decoded_token,
             "sec-websocket-protocol" in event["headers"],
         )
+        log.info(f"Generated policy: {json.dumps(policy)}")
+        return policy
     except jwt.InvalidTokenError as e:
         log.error(f"Token validation failed: {e}")
         return {
@@ -72,7 +74,9 @@ def check_event_for_error(event: dict) -> dict:
 
 def parse_token_from_event(event: dict) -> str:
     """Extract the Bearer token from the authorization header."""
+    log.info("Parsing token from event")
     auth_token_parts = event["authorizationToken"].split(" ")
+    log.info(f"auth_token_parts: {auth_token_parts}")
     if (
         len(auth_token_parts) != 2
         or auth_token_parts[0].lower() != "bearer"
@@ -140,40 +144,22 @@ def decode_token(event, token: str) -> dict:
         raise
 
 
-def get_policy(policy_resource_base: str, decoded: dict, is_ws: bool) -> dict:
+def get_policy(method_arn: str, decoded: dict, is_ws: bool) -> dict:
     """Create and return the policy for API Gateway."""
-    resources = []
-    user_permissions = decoded.get("permissions", [])
-    default_action = "execute-api:Invoke"
-
-    for perms, endpoints in AUTH_MAPPINGS.items():
-        if perms in user_permissions or perms == "principalId":
-            for endpoint in endpoints:
-                if not is_ws and "method" in endpoint and "resourcePath" in endpoint:
-                    url_build = f"{policy_resource_base}{endpoint['method']}{endpoint['resourcePath']}"  # noqa: E501
-                elif is_ws and "routeKey" in endpoint:
-                    url_build = f"{policy_resource_base}{endpoint['routeKey']}"
-                else:
-                    continue
-                resources.append(url_build)
 
     context = {
         "scope": decoded.get("scope"),
-        "permissions": json.dumps(
+        "permissions": ",".join(
             decoded.get("permissions", decoded.get("cognito:groups", []))
         ),
         "username": decoded.get("username"),
     }
-    log.info(f"context: {json.dumps(context)}")
-
-    if policy_resource_base == DEFAULT_ARN:
-        resources = [DEFAULT_ARN]
 
     return {
         "principalId": decoded["sub"],
         "policyDocument": {
             "Version": "2012-10-17",
-            "Statement": [create_statement("Allow", resources, [default_action])],
+            "Statement": [create_statement("Allow", method_arn, "execute-api:Invoke")],
         },
         "context": context,
     }

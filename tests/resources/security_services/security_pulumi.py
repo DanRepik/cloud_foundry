@@ -8,7 +8,16 @@ load_dotenv()
 
 
 class SecurityAPI(pulumi.ComponentResource):
-    def __init__(self, name, user_pool_id, client_id, client_secret, opts=None):
+    def __init__(
+        self,
+        name,
+        user_pool_id,
+        client_id,
+        client_secret,
+        user_admin_group: str = None,
+        user_default_group: str = None,
+        opts=None,
+    ):
         super().__init__("cloud_foundry:api:SecurityAPI", name, {}, opts)
         source_dir = "./tests/resources/security_services"
 
@@ -33,6 +42,8 @@ class SecurityAPI(pulumi.ComponentResource):
                 "CLIENT_SECRET": client_secret,
                 "ISSUER": get_issuer(),
                 "LOGGING_LEVEL": "DEBUG",
+                "USER_ADMIN_GROUP": user_admin_group,
+                "USER_DEFAULT_GROUP": user_default_group,
             },
             requirements=["pyjwt", "requests", "cryptography"],
             policy_statements=[
@@ -46,6 +57,10 @@ class SecurityAPI(pulumi.ComponentResource):
                         "cognito-idp:AdminGetUser",
                         "cognito-idp:AdminSetUserPassword",
                         "cognito-idp:AdminListGroupsForUser",
+                        "cognito-idp:AdminAddUserToGroup",
+                        "cognito-idp:AdminRemoveUserFromGroup",
+                        "cognito-idp:AdminDeleteUser",
+                        "cognito-idp:AdminUpdateUserAttributes",
                         "cognito-idp:GetJWKS",
                     ],
                     "Resources": [
@@ -86,27 +101,47 @@ class SecurityAPI(pulumi.ComponentResource):
             ],
             integrations=[
                 {
-                    "path": "/signup",
+                    "path": "/users",
                     "method": "post",
                     "function": self.security_function,
                 },
                 {
-                    "path": "/login",
+                    "path": "/users/{username}",
+                    "method": "get",
+                    "function": self.security_function,
+                },
+                {
+                    "path": "/users/me",
+                    "method": "delete",
+                    "function": self.security_function,
+                },
+                {
+                    "path": "/users/{username}",
+                    "method": "delete",
+                    "function": self.security_function,
+                },
+                {
+                    "path": "/users/me/password",
+                    "method": "put",
+                    "function": self.security_function,
+                },
+                {
+                    "path": "/users/{username}/groups",
+                    "method": "put",
+                    "function": self.security_function,
+                },
+                {
+                    "path": "/sessions",
                     "method": "post",
                     "function": self.security_function,
                 },
                 {
-                    "path": "/logout",
-                    "method": "post",
+                    "path": "/sessions/me",
+                    "method": "delete",
                     "function": self.security_function,
                 },
                 {
-                    "path": "/change_password",
-                    "method": "post",
-                    "function": self.security_function,
-                },
-                {
-                    "path": "/refresh-token",
+                    "path": "/sessions/refresh",
                     "method": "post",
                     "function": self.security_function,
                 },

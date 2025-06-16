@@ -79,7 +79,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                 "type": "token",
                 "authorizerUri": invoke_arn,
                 "identitySource": "method.request.header.Authorization",
-                "authorizerResultTtlInSeconds": 60,
+                "authorizerResultTtlInSeconds": 0,
             },
         }
 
