@@ -3,8 +3,6 @@ import hashlib
 import base64
 import json
 import os
-import jwt
-import requests
 import boto3
 from urllib.parse import unquote
 from botocore.exceptions import ClientError
@@ -17,12 +15,6 @@ log.setLevel(os.environ.get("LOGGING_LEVEL", "INFO"))
 cognito_client = boto3.client("cognito-idp")
 
 
-def handler(event, context):
-    log.info(f"Received event: {event}")
-    auth_service = AuthorizationServices()
-    return auth_service.handler(event, context)
-
-
 class AuthorizationServices:
     def __init__(
         self,
@@ -31,18 +23,16 @@ class AuthorizationServices:
         client_secret=None,
         user_admin_group=None,
         user_default_group=None,
-        region=None,
     ):
         self.user_pool_id = user_pool_id or os.getenv("USER_POOL_ID")
         self.client_id = client_id or os.getenv("CLIENT_ID")
         self.client_secret = client_secret or os.getenv("USER_ADMIN_GROUP")
         self.user_admin_group = user_admin_group or os.getenv("USER_ADMIN_GROUP")
         self.user_default_group = user_default_group or os.getenv("USER_DEFAULT_GROUP")
-        self.region = region or os.getenv("AWS_REGION", "us-east-1")
-        self.issuer = (
-            region
-            or f"https://cognito-idp.{self.region}.amazonaws.com/{self.user_pool_id}"
-        )
+        region = os.getenv("AWS_REGION")
+        assert (
+            self.user_pool_id and self.client_id and self.client_secret
+        ), "USER_POOL_ID, CLIENT_ID, and CLIENT_SECRET must be set"
         self.cognito_client = boto3.client("cognito-idp", region_name=region)
 
     def handler(self, event, context):
@@ -127,7 +117,7 @@ class AuthorizationServices:
             log.info(f"user_info: {user_info}")
             return {
                 "statusCode": 200,
-                "body": json.dumps({"user_info": user_info, "groups": groups}),
+                "body": json.dumps({"user_info": user_info, "groups": sorted(groups)}),
             }
         except ClientError as e:
             return {
@@ -431,11 +421,14 @@ class AuthorizationServices:
         """
         import re
 
-        to_list = lambda x: (
-            re.split(r"[,\s]+", x.strip())
-            if isinstance(x, str)
-            else x if isinstance(x, list) else []
-        )
+        def to_list(x):
+            if isinstance(x, str):
+                return re.split(r"[,\s]+", x.strip())
+            elif isinstance(x, list):
+                return x
+            else:
+                return []
+
         # Check for a 'permissions' claim (custom claim)
         if "permissions" in decoded_token:
             return to_list(decoded_token["permissions"])
@@ -447,3 +440,11 @@ class AuthorizationServices:
             return to_list(decoded_token["cognito:groups"])
         # No permissions found
         return []
+
+
+authorization_services = AuthorizationServices()
+
+
+def handler(event, context):
+    log.info(f"Received event: {event}")
+    return authorization_services.handler(event, context)

@@ -5,12 +5,11 @@ import logging
 import dotenv
 import boto3
 import uuid
-import os
 import json
 import pulumi
 import urllib.parse
 from user_pool import UserPool
-from tests.automation_helpers import deploy_stack, deploy_stack_no_teardown
+from tests.automation_helpers import deploy_stack
 from security_lambda import AuthorizationServices
 
 log = logging.getLogger(__name__)
@@ -40,7 +39,7 @@ def user_pool_pulumi():
 @pytest.fixture(scope="module")
 def user_pool_stack():
     log.info("Starting deployment of security services stack")
-    yield from deploy_stack_no_teardown("cf", "security-func", user_pool_pulumi())
+    yield from deploy_stack("cf", "security-func", user_pool_pulumi())
 
 
 @pytest.fixture(scope="module")
@@ -101,9 +100,7 @@ def member_user(service):
             "password": "MemberPass1234!",
         }
 
-        log.info(
-            f"Creating admin user: {member_payload['username']} in user pool: {service.user_pool_id}"
-        )
+        log.info(f"Creating member user: {member_payload['username']}")
         create_user(service, member_payload)
 
         yield member_payload
@@ -125,9 +122,7 @@ def admin_user(service):
         }
 
         create_user(service, admin_payload)
-        log.info(
-            f"Creating admin user: {admin_payload['username']} in user pool: {service.user_pool_id}"
-        )
+        log.info(f"Creating admin user: {admin_payload['username']}")
 
         # Add user to admin group
         client = boto3.client("cognito-idp")
@@ -162,7 +157,6 @@ def user_session(service, username, password):
             body={"username": username, "password": password},
         )
         response = service.handler(event, None)
-        log.info(f"Login user {username} response: {response}")
         assert response["statusCode"] == 200
         tokens = json.loads(response["body"])
         access_token = tokens.get("access_token")
@@ -200,20 +194,15 @@ def make_event(
 
 def test_create_and_login_user(authorization_services):
     # Setup
-    username = f"apitest_{uuid.uuid4()}@example.com"
-    password = "InitialPass123!"
-
-    response = create_user(
-        authorization_services, {"username": username, "password": password}
-    )
-    assert response["statusCode"] == 201
-
-    with user_session(authorization_services, username, password) as (
-        access_token,
-        refresh_token,
-    ):
-        assert access_token is not None
-        assert refresh_token is not None
+    with member_user(authorization_services) as member:
+        with user_session(
+            authorization_services, member["username"], member["password"]
+        ) as (
+            access_token,
+            refresh_token,
+        ):
+            assert access_token is not None
+            assert refresh_token is not None
 
 
 def test_delete_user(authorization_services):
@@ -249,26 +238,31 @@ def test_change_password(authorization_services):
         new_password = "NewPass12345!"
         with user_session(
             authorization_services, member["username"], member["password"]
-        ) as (access_token, _):
-            event = make_event(
-                path="/users/me/password",
-                method="PUT",
-                headers={"Authorization": f"Bearer {access_token}"},
-                body={"old_password": member["password"], "new_password": new_password},
-                authorizer_context={
-                    "permissions": ["member"],
-                    "username": member["username"],
-                },
+        ) as (user_token, _):
+            response = authorization_services.handler(
+                make_event(
+                    path="/users/me/password",
+                    method="PUT",
+                    headers={"Authorization": f"Bearer {user_token}"},
+                    body={
+                        "old_password": member["password"],
+                        "new_password": new_password,
+                    },
+                    authorizer_context={
+                        "permissions": ["member"],
+                        "username": member["username"],
+                    },
+                ),
+                None,
             )
-            response = authorization_services.handler(event, None)
             assert response["statusCode"] == 200
 
         with user_session(authorization_services, member["username"], new_password) as (
-            access_token,
+            new_access_token,
             _,
         ):
-            sleep(10)  # wait for eventual consistency
-            assert access_token is not None
+            sleep(15)  # wait for eventual consistency
+            assert new_access_token is not None
 
 
 def test_get_user(authorization_services):
@@ -365,7 +359,7 @@ def test_change_groups(authorization_services):
                 assert response["statusCode"] == 200
                 body = json.loads(response["body"])
                 log.info(f"body: {body}")
-                assert body["groups"] == ["member", "manager"]
+                assert body["groups"] == ["manager", "member"]
 
                 # add a role
                 response = authorization_services.handler(
@@ -402,9 +396,6 @@ def test_change_groups(authorization_services):
                 body = json.loads(response["body"])
                 log.info(f"body: {body}")
                 assert body["groups"] == ["member"]
-
-                assert False
-    #            delete_user(authorization_services, access_token, member_payload["username"])
 
 
 def test_refresh_token(authorization_services):

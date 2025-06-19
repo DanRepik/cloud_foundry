@@ -1,0 +1,56 @@
+@startuml
+title Test Flow with authorization_services and user_pool_stack Fixtures
+
+actor Tester
+participant "pytest" as Pytest
+participant "unit test" as UnitTest
+participant "authorization_services\n(fixture)" as AuthServices
+participant "AuthorizationServices\n(instance)" as Service
+participant "user_pool_stack\n(fixture)" as UserPoolStack
+participant "Pulumi Stack" as PulumiStack
+
+== Test Setup ==
+
+Tester -> Pytest ++ : Run tests with pytest
+Pytest -> UnitTest ++ : Discover tests and fixtures
+UnitTest -> Pytest -- : Requires authorization_services
+Pytest -> AuthServices ++ : Discover fixtures
+AuthServices -> Pytest -- : Requires user_pool_stack
+
+Pytest -> UserPoolStack ++ : Build user_pool_stack fixture (module scope)
+UserPoolStack -> PulumiStack ** : Provision Pulumi Stack (User Pool & Client)
+UserPoolStack --> Pytest -- : Yield user pool outputs
+
+group Yield from user_pool_stack fixture
+
+    Pytest -> AuthServices ++ : Build authorization_services fixture (module scope)
+    AuthServices -> UserPoolStack ++ : Get user pool outputs
+    UserPoolStack --> AuthServices -- : User pool outputs ready
+    AuthServices -> Service ** : Instantiate AuthorizationServices\n(with user pool outputs)
+
+    AuthServices --> Pytest -- : Yield authorization_services instance
+    group Yield from authorization_services fixture
+        == Test Execution ==
+
+        Pytest -> UnitTest ++ : Execute test with authorization_services
+        UnitTest -> Service ++ : Mock event and call handler(event, context)
+        Service -> PulumiStack ++ : Perform user pool operations (e.g., create user, login)
+        PulumiStack --> Service -- : Operation result
+        Service --> UnitTest -- : Handler response
+        UnitTest -> Pytest -- : Return: Test result (pass/fail)
+
+    end
+    == Test Teardown ==
+
+    Pytest -> AuthServices ++ : (after all tests) Return to authorization_services yield point
+    AuthServices -> Service !! : Teardown resources
+    AuthServices -> Pytest -- : Return
+end
+
+Pytest -> UserPoolStack ++ : (after all tests) Return to user_pool_stack yield point
+UserPoolStack -> PulumiStack !! : Destroy PulumiStack resources
+UserPoolStack -> Pytest -- : Return
+
+Pytest -> UnitTest: Finalize test execution
+
+@enduml
