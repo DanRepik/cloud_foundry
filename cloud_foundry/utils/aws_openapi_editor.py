@@ -7,6 +7,8 @@ from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.openapi_editor import OpenAPISpecEditor
 import boto3
 import yaml
+import os
+import json
 
 log = logger(__name__)
 
@@ -28,32 +30,84 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                 or a file path.
         """
         # If the spec is a list, resolve S3 URIs to their content
-        resolved_spec = None
-        if isinstance(spec, list):
-            resolved_spec = []
-            for item in spec:
-                if item.startswith("s3://"):
-                    bucket, key = item[5:].split("/", 1)
-                    s3_client = boto3.client("s3")
-                    response = s3_client.get_object(Bucket=bucket, Key=key)
-                    content = response["Body"].read().decode("utf-8")
-                    resolved_spec.append(content)
-                else:
-                    resolved_spec.append(item)
-        super().__init__(
-            resolved_spec
-            or spec
-            or {
-                "openapi": "3.0.3",
-                "info": {
-                    "title": "API",
-                    "version": "1.0.0",
-                    "description": "Generated OpenAPI Spec",
-                },
-                "paths": {},
-                "components": {"schemas": {}, "securitySchemes": {}},
-            }
-        )
+        super().__init__(spec)
+
+    def merge_spec_item(self, item):
+        if isinstance(item, str):
+            if item.startswith("s3://"):
+                self.merge_spec_item(self._resolve_s3_item(item))
+            elif item.startswith("pkg://"):
+                self.merge_spec_item(self._resolve_package_item(item))
+            else:
+                super().merge_spec_item(item)
+        else:
+            super().merge_spec_item(item)
+
+    def _resolve_package_item(self, item: str) -> List[str]:
+        # Import from a Python package resource (Format: pkg://package.module/resource_path)
+        import importlib.resources
+
+        pkg_and_path = item[6:]
+        if "/" not in pkg_and_path:
+            log.warning(f"Invalid pkg:// URI: '{item}'")
+            raise ValueError(f"Invalid pkg:// URI: '{item}'")
+        pkg, rel_path = pkg_and_path.split("/", 1)
+        if rel_path.endswith("/"):
+            # It's a folder in the package
+            try:
+                files = sorted(
+                    [
+                        name
+                        for name in importlib.resources.contents(pkg)
+                        if name.startswith(rel_path)
+                        and name.lower().endswith((".yaml", ".yml", ".json"))
+                    ]
+                )
+                for fname in files:
+                    with importlib.resources.open_text(
+                        pkg, fname, encoding="utf-8"
+                    ) as f:
+                        self.merge_spec_item(f.read())
+            except Exception as e:
+                log.warning(
+                    f"Could not import folder '{rel_path}' from package '{pkg}': {e}"
+                )
+        else:
+            # It's a single file in the package
+            try:
+                with importlib.resources.open_text(
+                    pkg, rel_path, encoding="utf-8"
+                ) as f:
+                    self.merge_spec_item(f.read())
+            except Exception as e:
+                log.warning(
+                    f"Could not import file '{rel_path}' from package '{pkg}': {e}"
+                )
+
+    def _resolve_s3_item(self, item: str, resolved_spec: List[str]) -> List[str]:
+        s3_path = item[5:]
+        if s3_path.endswith("/"):
+            # It's a folder: list all YAML/YML/JSON files in the prefix, import in alphabetical order
+            bucket, prefix = s3_path.split("/", 1)
+            s3_client = boto3.client("s3")
+            paginator = s3_client.get_paginator("list_objects_v2")
+            file_keys = []
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if key.lower().endswith((".yaml", ".yml", ".json")):
+                        file_keys.append(key)
+            for key in sorted(file_keys):
+                response = s3_client.get_object(Bucket=bucket, Key=key)
+                content = response["Body"].read().decode("utf-8")
+                resolved_spec.append(content)
+        else:
+            # It's a single file
+            bucket, key = s3_path.split("/", 1)
+            s3_client = boto3.client("s3")
+            response = s3_client.get_object(Bucket=bucket, Key=key)
+            content = response["Body"].read().decode("utf-8")
+            resolved_spec.append(content)
 
     def add_token_validator(self, name: str, function_name: str, invoke_arn: str):
         """

@@ -6,7 +6,6 @@ import requests
 import os
 import dotenv
 from cloud_foundry import python_function, rest_api
-from tests.resources.security_services.security_pulumi import SecurityAPI
 
 log = logging.getLogger(__name__)
 dotenv.load_dotenv()

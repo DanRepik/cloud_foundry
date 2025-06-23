@@ -7,6 +7,8 @@ import zipfile
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.hash_comparator import HashComparator
 from cloud_foundry.archive_builder import ArchiveBuilder
+import boto3
+from urllib.parse import urlparse
 
 log = logger(__name__)
 
@@ -139,7 +141,79 @@ class PythonArchiveBuilder(ArchiveBuilder):
         for destination, source in self._sources.items():
             destination_path = os.path.join(self._staging, destination)
             try:
-                if os.path.isdir(source):
+                if isinstance(source, str) and source.startswith("s3://"):
+                    # Import from S3
+                    s3 = boto3.client("s3")
+                    parsed = urlparse(source)
+                    bucket = parsed.netloc
+                    key = parsed.path.lstrip("/")
+
+                    # Check if S3 key is a "folder" (ends with /) or a file
+                    if source.endswith("/"):
+                        # Download all objects under this prefix
+                        paginator = s3.get_paginator("list_objects_v2")
+                        for page in paginator.paginate(Bucket=bucket, Prefix=key):
+                            for obj in page.get("Contents", []):
+                                obj_key = obj["Key"]
+                                rel_path = os.path.relpath(obj_key, key)
+                                dest_file = os.path.join(destination_path, rel_path)
+                                os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+                                s3.download_file(bucket, obj_key, dest_file)
+                        log.info(
+                            f"S3 folder copied from {source} to {destination_path}"
+                        )
+                    else:
+                        # Download single file
+                        os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+                        s3.download_file(bucket, key, destination_path)
+                        log.info(f"S3 file copied from {source} to {destination_path}")
+                elif isinstance(source, str) and source.startswith("pkg://"):
+                    # Import from a Python package resource
+                    import importlib.resources
+
+                    # Format: pkg://package.module/resource_path
+                    pkg_url = source[len("pkg://") :]
+                    if "/" in pkg_url:
+                        pkg_name, resource_path = pkg_url.split("/", 1)
+                    else:
+                        pkg_name, resource_path = pkg_url, ""
+
+                    try:
+                        if resource_path and resource_path.endswith("/"):
+                            # Copy all resources under a package directory
+                            # Note: importlib.resources.files is available in Python 3.9+
+                            files = importlib.resources.files(pkg_name).joinpath(
+                                resource_path.rstrip("/")
+                            )
+                            for item in files.rglob("*"):
+                                if item.is_file():
+                                    rel_path = os.path.relpath(str(item), str(files))
+                                    dest_file = os.path.join(destination_path, rel_path)
+                                    os.makedirs(
+                                        os.path.dirname(dest_file), exist_ok=True
+                                    )
+                                    with importlib.resources.as_file(item) as src_file:
+                                        shutil.copy2(src_file, dest_file)
+                            log.info(
+                                f"Package folder copied from {source} to {destination_path}"
+                            )
+                        else:
+                            # Copy a single resource file
+                            os.makedirs(
+                                os.path.dirname(destination_path), exist_ok=True
+                            )
+                            with importlib.resources.files(pkg_name).joinpath(
+                                resource_path
+                            ) as resource:
+                                with importlib.resources.as_file(resource) as src_file:
+                                    shutil.copy2(src_file, destination_path)
+                            log.info(
+                                f"Package file copied from {source} to {destination_path}"
+                            )
+                    except Exception as e:
+                        log.error(f"Error importing package resource {source}: {e}")
+                        raise
+                elif os.path.isdir(source):
                     shutil.copytree(source, destination_path)
                     log.info(f"Folder copied from {source} to {destination_path}")
                 elif os.path.isfile(source):

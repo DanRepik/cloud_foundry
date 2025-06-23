@@ -19,45 +19,21 @@ class OpenAPISpecEditor:
             spec (Union[str, List[str]]): A string representing a YAML content,
             a file path, or a list of strings containing YAML contents or file paths.
         """
-        self.openapi_spec = {}
+        self.openapi_spec = {
+            "openapi": "3.0.3",
+            "info": {
+                "title": "API",
+                "version": "1.0.0",
+                "description": "Generated OpenAPI Spec",
+            },
+            "paths": {},
+            "components": {"schemas": {}, "securitySchemes": {}},
+        }
         self._yaml = None
-        log.info("Initializing OpenAPISpecEditor")
-
-        if isinstance(spec, dict):
-            self.openapi_spec = spec
-        elif isinstance(spec, list):
-            for individual_spec in spec:
-                self._merge_spec(individual_spec)
-        elif isinstance(spec, str):
-            self._merge_spec(spec)
-
-    def _merge_spec(self, spec: str):
-        """Merge a single OpenAPI spec into the current one."""
-        # Check if the string is a file path to a YAML file
-        if os.path.isfile(spec) and (spec.endswith(".yaml") or spec.endswith(".yml")):
-            log.info(f"Loading OpenAPI spec from file: {spec}")
-            new_spec_dict = self._load_openapi_spec(spec)
-        else:
-            log.info("Loading OpenAPI spec from string")
-            # Assume the string is YAML content and parse it
-            new_spec_dict = yaml.safe_load(spec)
-
-        # Deep merge the new spec into the current spec
-        self.openapi_spec = self._deep_merge(new_spec_dict, self.openapi_spec)
-
-    def _load_openapi_spec(self, file_name) -> Dict:
-        """Load the OpenAPI spec from a YAML or JSON file."""
-        log.info(f"Loading OpenAPI spec from file: {file_name}")
-        with open(file_name, "r") as file:
-            if file_name.endswith(".yaml") or file_name.endswith(".yml"):
-                return yaml.safe_load(file)
-            elif file_name.endswith(".json"):
-                return json.load(file)
-            else:
-                raise ValueError("Unsupported file format. Use .json, .yaml, or .yml.")
+        self.merge_spec_item(spec)
 
     def _deep_merge(
-        self, source: Dict[Any, Any], destination: Dict[Any, Any]
+        self, source: Dict[Any, Any], destination: Dict[Any, Any] = None
     ) -> Dict[Any, Any]:
         """
         Deep merge two dictionaries. The source dictionary's values will overwrite
@@ -71,6 +47,9 @@ class OpenAPISpecEditor:
         Returns:
             Dict[Any, Any]: The merged dictionary.
         """
+        if destination is None:
+            destination = self.openapi_spec
+
         for key, value in source.items():
             if isinstance(value, Mapping) and isinstance(destination.get(key), Mapping):
                 destination[key] = self._deep_merge(value, destination.get(key, {}))
@@ -87,6 +66,43 @@ class OpenAPISpecEditor:
             else:
                 destination[key] = value
         return destination
+
+    def merge_spec_item(self, item: Union[str, list[str]]) -> Dict[str, Any]:
+        if not item:
+            return
+        if isinstance(item, dict):
+            self._deep_merge(item)
+        elif isinstance(item, list):
+            for elem in item:
+                self.merge_spec_item(elem)
+        elif os.path.isdir(item):
+            # Import all YAML/YML/JSON files from the folder in alphabetical order
+            files = sorted(
+                [
+                    f
+                    for f in os.listdir(item)
+                    if f.lower().endswith((".yaml", ".yml", ".json"))
+                ]
+            )
+            # Sort the files before processing
+            files = sorted(files)
+            for fname in files:
+                self.merge_spec_item(os.path.join(item, fname))
+        elif os.path.isfile(item) and item.lower().endswith((".yaml", ".yml", ".json")):
+            # Import a single YAML/YML/JSON file
+            with open(item, "r", encoding="utf-8") as f:
+                self.merge_spec_item(f.read())
+        else:
+            # If item is a string, try to parse as YAML or JSON
+            try:
+                # Try YAML first (YAML is a superset of JSON)
+                data = yaml.safe_load(item)
+                if isinstance(data, dict):
+                    self._deep_merge(data)
+                else:
+                    self._deep_merge(json.load(f))
+            except Exception as e:
+                raise ValueError(f"Failed to parse string as YAML/JSON: {e}")
 
     def get_or_create_spec_part(self, keys: List[str], create: bool = False) -> Any:
         """
@@ -222,40 +238,6 @@ class OpenAPISpecEditor:
 
         self.openapi_spec = remove_matching_keys(self.openapi_spec)
         log.info(f"Attributes matching '{pattern}' have been removed from the spec.")
-
-    def merge_with(self, new_spec: Union[Dict, str]) -> "OpenAPISpecEditor":
-        """
-        Merge another OpenAPI specification with the current one, with the new
-        spec winning conflicts.
-
-        Args:
-            new_spec (Union[Dict, str]): The new OpenAPI specification to merge in.
-            Can be a dictionary or a string representing YAML content or a file path.
-
-        Returns:
-            OpenAPISpecEditor: Returns the instance for chaining.
-        """
-        if isinstance(new_spec, dict):
-            new_spec_dict = new_spec
-        elif isinstance(new_spec, str):
-            # Check if the string is a file path to a YAML file
-            if os.path.isfile(new_spec) and (
-                new_spec.endswith(".yaml") or new_spec.endswith(".yml")
-            ):
-                with open(new_spec, "r") as file:
-                    new_spec_dict = yaml.safe_load(file)
-            else:
-                # Assume the string is YAML content and parse it
-                new_spec_dict = yaml.safe_load(new_spec)
-        else:
-            raise ValueError(
-                "The new_spec must be a dictionary or a valid YAML string or file path."
-            )
-
-        # Deep merge the new spec into the current spec, with new_spec taking precedence
-        self.openapi_spec = self._deep_merge(new_spec_dict, self.openapi_spec)
-
-        return self
 
     def to_yaml(self) -> str:
         """Return the OpenAPI specification as a YAML-formatted string."""

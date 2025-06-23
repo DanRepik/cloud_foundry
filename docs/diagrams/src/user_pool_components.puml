@@ -1,0 +1,27 @@
+@startuml
+!theme plain
+
+package "AWS Cognito" {
+  [Cognito User Pool] as UserPool
+  [Cognito User Pool Client] as UserPoolClient
+  [Cognito User Group] as UserGroup1
+  [Cognito User Group] as UserGroup2
+  [Cognito User Group] as UserGroupN
+}
+
+package "Pulumi Component" {
+  [UserPool ComponentResource] as UserPoolComponent
+}
+
+UserPoolComponent -down-> UserPool : creates
+UserPoolComponent -down-> UserPoolClient : creates
+UserPoolComponent -down-> UserGroup1 : creates
+UserPoolComponent -down-> UserGroup2 : creates
+UserPoolComponent -down-> UserGroupN : creates
+
+UserPoolClient --> UserPool : uses
+UserGroup1 --> UserPool : belongs to
+UserGroup2 --> UserPool : belongs to
+UserGroupN --> UserPool : belongs to
+
+@enduml

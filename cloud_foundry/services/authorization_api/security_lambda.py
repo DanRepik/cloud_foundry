@@ -30,13 +30,15 @@ class AuthorizationServices:
         self.user_admin_group = user_admin_group or os.getenv("USER_ADMIN_GROUP")
         self.user_default_group = user_default_group or os.getenv("USER_DEFAULT_GROUP")
         region = os.getenv("AWS_REGION")
-        assert (
-            self.user_pool_id and self.client_id and self.client_secret
-        ), "USER_POOL_ID, CLIENT_ID, and CLIENT_SECRET must be set"
         self.cognito_client = boto3.client("cognito-idp", region_name=region)
 
     def handler(self, event, context):
         log.info(f"event: {event}")
+
+        assert (
+            self.user_pool_id and self.client_id and self.client_secret
+        ), "USER_POOL_ID, CLIENT_ID, and CLIENT_SECRET must be set"
+
         path = event.get("resource", "")
         http_method = event.get("httpMethod", "").upper()
         log.info(f"Path: {path}, HTTP Method: {http_method}")
@@ -65,7 +67,6 @@ class AuthorizationServices:
 
     def create_user(self, event):
         body = json.loads(event["body"])
-        log.info(f"body: {body}")
         username = body.get("username") or body.get("email")
         password = body.get("password")
 
@@ -91,7 +92,6 @@ class AuthorizationServices:
             )
             # Add user to default group if self.user_default_group is set
             if self.user_default_group:
-                log.info(f"Adding user {username} to group {self.user_default_group}")
                 cognito_client.admin_add_user_to_group(
                     UserPoolId=self.user_pool_id,
                     Username=username,
@@ -109,12 +109,20 @@ class AuthorizationServices:
             }
 
     def get_user(self, event):
-        log.info("Getting user")
+        # Check if admin group is defined and user is an admin
+        if self.user_admin_group:
+            permissions = self.get_permissions_from_event(event)
+            if self.user_admin_group not in permissions:
+                return {
+                    "statusCode": 403,
+                    "body": json.dumps(
+                        {"message": "You are not authorized to delete users"}
+                    ),
+                }
+
         username = unquote(event["pathParameters"]["username"])
-        log.info(f"username: {username}")
         try:
             user_info, groups = self.fetch_user_info(username)
-            log.info(f"user_info: {user_info}")
             return {
                 "statusCode": 200,
                 "body": json.dumps({"user_info": user_info, "groups": sorted(groups)}),
@@ -126,11 +134,17 @@ class AuthorizationServices:
             }
 
     def delete_user(self, event):
-        log.info("Deleting user")
-        permissions = self.get_permissions_from_token(
-            event["requestContext"]["authorizer"]
-        )
-        log.info(f"permissions: {permissions}")
+        # Check if admin group is defined and user is an admin
+        if self.user_admin_group:
+            permissions = self.get_permissions_from_event(event)
+            if self.user_admin_group not in permissions:
+                return {
+                    "statusCode": 403,
+                    "body": json.dumps(
+                        {"message": "You are not authorized to delete users"}
+                    ),
+                }
+
         username = event["pathParameters"]["username"]
         try:
             # If username is 'me', get the actual username from the authorizer
@@ -141,18 +155,7 @@ class AuthorizationServices:
         except Exception:
             # If decoding fails, just use the original username
             pass
-        log.info(f"username: {username}")
 
-        # Check if admin group is defined and user is an admin
-        if self.user_admin_group:
-            if self.user_admin_group not in permissions:
-                return {
-                    "statusCode": 403,
-                    "body": json.dumps(
-                        {"message": "You are not authorized to delete users"}
-                    ),
-                }
-        log.info(f"Deleting user: {username}")
         try:
             cognito_client.admin_delete_user(
                 UserPoolId=self.user_pool_id,
@@ -171,22 +174,39 @@ class AuthorizationServices:
 
     def change_user_password(self, event):
         body = json.loads(event["body"])
-        request_context = event.get("requestContext")
-        log.info(f"request_context: {request_context}")
-        log.info(f"body: {body}")
-        username = request_context.get("authorizer", {}).get("username")
-        new_password = body.get("new_password")
-
-        log.info(
-            f"Changing password for user: {username}, new_password: {new_password}"
-        )
         try:
-            cognito_client.admin_set_user_password(
-                UserPoolId=self.user_pool_id,
-                Username=username,
-                Password=new_password,
-                Permanent=True,
+            request_context = event.get("requestContext")
+            username = request_context.get("authorizer", {}).get("username")
+            access_token = self.get_access_token(event)
+            if not access_token:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps(
+                        {"message": "Access token is required to change password"}
+                    ),
+                }
+            old_password = body.get("old_password")
+            if not old_password:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps({"message": "Old password is required"}),
+                }
+
+            new_password = body.get("new_password")
+            log.info(
+                f"Changing password for user: {username}, new_password: {new_password}"
             )
+
+            result = cognito_client.change_password(
+                PreviousPassword=old_password,
+                ProposedPassword=new_password,
+                AccessToken=access_token,
+            )
+            if result["ResponseMetadata"]["HTTPStatusCode"] != 200:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps({"message": "Password change failed"}),
+                }
 
             return {
                 "statusCode": 200,
@@ -199,9 +219,20 @@ class AuthorizationServices:
             }
 
     def change_user_groups(self, event):
+        # Check if admin group is defined and user is an admin
+        if self.user_admin_group:
+            permissions = self.get_permissions_from_event(event)
+            log.info(f"permissions: {permissions}")
+            if self.user_admin_group not in permissions:
+                return {
+                    "statusCode": 403,
+                    "body": json.dumps(
+                        {"message": "You are not authorized to delete users"}
+                    ),
+                }
+
         username = unquote(event["pathParameters"]["username"])
         body = json.loads(event["body"])
-        log.info(f"body: {body}")
         groups = body.get("groups", [])
 
         try:
@@ -237,15 +268,12 @@ class AuthorizationServices:
     def create_session(self, event):
         # Log all the request headers
         headers = event.get("headers", {})
-        log.info(f"Request headers: {headers}")
         body = json.loads(event["body"])
-        log.info(f"body: {body}")
         username = body.get("username") or body.get("email")
         password = body.get("password")
         secret_hash = self.calculate_secret_hash(username)
 
         try:
-            log.info(f"username: {username}")
             response = cognito_client.initiate_auth(
                 AuthFlow="USER_PASSWORD_AUTH",
                 AuthParameters={
@@ -280,22 +308,7 @@ class AuthorizationServices:
 
     def delete_session(self, event):
         try:
-            headers = event.get("headers", {})
-            authorization_header = headers.get("Authorization")
-
-            if not authorization_header:
-                log.error("Authorization header is missing")
-                return {
-                    "statusCode": 400,
-                    "body": json.dumps({"message": "Authorization header is required"}),
-                }
-
-            access_token = (
-                authorization_header.split(" ")[1]
-                if " " in authorization_header
-                else authorization_header
-            )
-
+            access_token = self.get_access_token(event)
             if not access_token:
                 return {
                     "statusCode": 200,
@@ -303,9 +316,7 @@ class AuthorizationServices:
                 }
 
             response = cognito_client.global_sign_out(AccessToken=access_token)
-            log.info(f"Logout response: {response}")
             if response["ResponseMetadata"]["HTTPStatusCode"] != 200:
-                log.error("Logout failed")
                 return {
                     "statusCode": 400,
                     "body": json.dumps({"message": "Logout failed"}),
@@ -328,12 +339,10 @@ class AuthorizationServices:
         return base64.b64encode(secret_hash).decode("utf-8")
 
     def refresh_session(self, event):
-        log.info("Starting refresh_token function")
         body = json.loads(event["body"])
 
         refresh_token = body.get("refresh_token")
         if not refresh_token:
-            log.info("Refresh token is missing in the request")
             return {
                 "statusCode": 400,
                 "body": json.dumps({"message": "Refresh token is required"}),
@@ -342,7 +351,6 @@ class AuthorizationServices:
         username = event["requestContext"]["authorizer"].get("username")
 
         try:
-            log.info("Attempting to use the refresh token to get new tokens")
             # Use the refresh token to get new tokens
             secret_hash = self.calculate_secret_hash(
                 username
@@ -355,7 +363,6 @@ class AuthorizationServices:
                 },
                 ClientId=self.client_id,
             )
-            log.info(f"InitiateAuth response: {response}")
 
             # Extract tokens from the response
             access_token = response["AuthenticationResult"]["AccessToken"]
@@ -363,9 +370,6 @@ class AuthorizationServices:
             new_refresh_token = response["AuthenticationResult"].get(
                 "RefreshToken", refresh_token
             )  # Use the new refresh token if provided
-            log.info(f"Access token: {access_token}")
-            log.info(f"ID token: {id_token}")
-            log.info(f"Refresh token: {new_refresh_token}")
 
             user_info, groups = self.fetch_user_info(username)
 
@@ -403,17 +407,15 @@ class AuthorizationServices:
             attr["Name"]: attr["Value"]
             for attr in user_details.get("UserAttributes", [])
         }
-        log.info(f"User attributes: {attributes}")
         # Get the user's groups
         user_groups = cognito_client.admin_list_groups_for_user(
             UserPoolId=self.user_pool_id, Username=username
         )
         groups = [group["GroupName"] for group in user_groups.get("Groups", [])]
-        log.info(f"User groups: {groups}")
 
         return attributes, groups
 
-    def get_permissions_from_token(self, decoded_token):
+    def get_permissions_from_event(self, event):
         """
         Extracts permissions from a decoded JWT token.
         Looks for 'permissions', 'scope', or 'cognito:groups' claims.
@@ -429,22 +431,43 @@ class AuthorizationServices:
             else:
                 return []
 
+        authorizer = event.get("requestContext", {}).get("authorizer", {})
+
         # Check for a 'permissions' claim (custom claim)
-        if "permissions" in decoded_token:
-            return to_list(decoded_token["permissions"])
+        if "permissions" in authorizer:
+            return to_list(authorizer["permissions"])
         # Check for OAuth2 'scope' claim
-        if "scope" in decoded_token:
-            return to_list(decoded_token["scope"])
+        if "scope" in authorizer:
+            return to_list(authorizer["scope"])
         # Check for Cognito groups
-        if "cognito:groups" in decoded_token:
-            return to_list(decoded_token["cognito:groups"])
+        if "cognito:groups" in authorizer:
+            return to_list(authorizer["cognito:groups"])
         # No permissions found
         return []
+
+    def get_access_token(self, event) -> str:
+        """
+        Extracts the access token from the event.
+        """
+        headers = event.get("headers", {})
+        authorization_header = headers.get("Authorization")
+
+        if not authorization_header:
+            log.error("Authorization header is missing")
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"message": "Authorization header is required"}),
+            }
+
+        return (
+            authorization_header.split(" ")[1]
+            if " " in authorization_header
+            else authorization_header
+        )
 
 
 authorization_services = AuthorizationServices()
 
 
 def handler(event, context):
-    log.info(f"Received event: {event}")
     return authorization_services.handler(event, context)
