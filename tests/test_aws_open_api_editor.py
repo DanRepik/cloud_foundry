@@ -1,6 +1,9 @@
 import pytest
+import boto3
+import json
+import uuid
 from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
-
+from tests.automation_helpers import deploy_stack_no_teardown
 
 @pytest.fixture
 def simple_hello_spec():
@@ -58,6 +61,21 @@ def simple_goodbye_spec():
         },
         "components": {"schemas": {}, "securitySchemes": {}},
     }
+
+def s3_deployment():
+    def pulumi_program():
+        import pulumi
+        from cloud_foundry import site_bucket
+        import uuid
+        bucket = site_bucket(
+            name="test-bucket")
+        pulumi.export("bucket_name", bucket.bucket_name) 
+
+    return pulumi_program
+
+@pytest.fixture(scope="module")
+def simple_s3_stack():
+    yield from deploy_stack_no_teardown("cf-test", "simple-s3", s3_deployment())
 
 
 def test_add_token_validator(simple_hello_spec):
@@ -160,3 +178,37 @@ def test_remove_unintegrated_operations():
     assert "get" in editor.openapi_spec["paths"]["/foo"]
     assert "post" not in editor.openapi_spec["paths"]["/foo"]
     assert "/bar" not in editor.openapi_spec["paths"]
+
+def test_retrieve_file_from_s3(simple_s3_stack, simple_hello_spec):
+    # Get the bucket name from the Pulumi stack outputs
+    context, outputs = simple_s3_stack
+    print(f"outputs: {outputs}")
+    bucket_name = outputs["bucket_name"].value
+
+    # Create the S3 client
+    s3 = boto3.client("s3")
+
+    # Upload a test file to the bucket
+    test_key = f"test-folder/test-file-{uuid.uuid4().hex}.txt"
+    test_content = json.dumps(simple_hello_spec)
+    s3.put_object(Bucket=bucket_name, Key=test_key, Body=test_content)
+
+    editor = AWSOpenAPISpecEditor(f"s3://{bucket_name}/{test_key}")
+    print(f"editor: {editor.to_yaml}")
+
+def test_list_folder_from_s3(simple_s3_stack):
+    context, outputs = simple_s3_stack
+    bucket_name = outputs["bucket_name"].value
+    s3 = boto3.client("s3")
+
+    # Upload multiple files to a folder
+    folder = f"folder-{uuid.uuid4().hex}/"
+    keys = [f"{folder}file1.txt", f"{folder}file2.txt", f"{folder}file3.txt"]
+    for key in keys:
+        s3.put_object(Bucket=bucket_name, Key=key, Body=b"data")
+
+    # List objects in the folder
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=folder)
+    returned_keys = [obj["Key"] for obj in response.get("Contents", [])]
+    for key in keys:
+        assert key in returned_keys

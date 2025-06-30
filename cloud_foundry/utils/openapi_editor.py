@@ -100,7 +100,7 @@ class OpenAPISpecEditor:
                 if isinstance(data, dict):
                     self._deep_merge(data)
                 else:
-                    self._deep_merge(json.load(f))
+                    self._deep_merge(json.load(item))
             except Exception as e:
                 raise ValueError(f"Failed to parse string as YAML/JSON: {e}")
 

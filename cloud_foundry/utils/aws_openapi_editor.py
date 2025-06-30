@@ -35,6 +35,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
     def merge_spec_item(self, item):
         if isinstance(item, str):
             if item.startswith("s3://"):
+                temo = self._resolve_s3_item(item)
                 self.merge_spec_item(self._resolve_s3_item(item))
             elif item.startswith("pkg://"):
                 self.merge_spec_item(self._resolve_package_item(item))
@@ -84,7 +85,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                     f"Could not import file '{rel_path}' from package '{pkg}': {e}"
                 )
 
-    def _resolve_s3_item(self, item: str, resolved_spec: List[str]) -> List[str]:
+    def _resolve_s3_item(self, item: str) -> List[str]:
         s3_path = item[5:]
         if s3_path.endswith("/"):
             # It's a folder: list all YAML/YML/JSON files in the prefix, import in alphabetical order
@@ -100,14 +101,14 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             for key in sorted(file_keys):
                 response = s3_client.get_object(Bucket=bucket, Key=key)
                 content = response["Body"].read().decode("utf-8")
-                resolved_spec.append(content)
+                self.merge_spec_item(content)
         else:
             # It's a single file
             bucket, key = s3_path.split("/", 1)
             s3_client = boto3.client("s3")
             response = s3_client.get_object(Bucket=bucket, Key=key)
             content = response["Body"].read().decode("utf-8")
-            resolved_spec.append(content)
+            self.merge_spec_item(content)
 
     def add_token_validator(self, name: str, function_name: str, invoke_arn: str):
         """
