@@ -239,6 +239,74 @@ class OpenAPISpecEditor:
         self.openapi_spec = remove_matching_keys(self.openapi_spec)
         log.info(f"Attributes matching '{pattern}' have been removed from the spec.")
 
+    def prune(self, keys: List[str]) -> Any:
+        """
+        Remove the attribute specified by the path list from the OpenAPI spec and return the pruned element.
+
+        Args:
+            keys (List[str]): A list of keys representing the path to the attribute to remove.
+
+        Returns:
+            Any: The pruned element if found and removed, otherwise None.
+        """
+        if not keys:
+            return None
+        part = self.openapi_spec
+        for key in keys[:-1]:
+            if key in part and isinstance(part[key], dict):
+                part = part[key]
+            else:
+                log.warning(f"Path '{'.'.join(keys)}' does not exist in the spec.")
+                return None
+        removed = part.pop(keys[-1], None)
+        if removed is not None:
+            log.info(f"Attribute '{'.'.join(keys)}' has been pruned from the spec.")
+        else:
+            log.warning(f"Attribute '{'.'.join(keys)}' not found for pruning.")
+        return removed
+        """
+        Remove the attribute specified by the path list from the OpenAPI spec.
+
+        Args:
+            keys (List[str]): A list of keys representing the path to the attribute to remove.
+
+        Returns:
+            None
+        """
+        if not keys:
+            return
+        part = self.openapi_spec
+        for key in keys[:-1]:
+            if key in part and isinstance(part[key], dict):
+                part = part[key]
+            else:
+                log.warning(f"Path '{'.'.join(keys)}' does not exist in the spec.")
+                return
+        removed = part.pop(keys[-1], None)
+        if removed is not None:
+            log.info(f"Attribute '{'.'.join(keys)}' has been pruned from the spec.")
+        else:
+            log.warning(f"Attribute '{'.'.join(keys)}' not found for pruning.")
+
+    def set(self, keys: List[str], value: Any) -> "OpenAPISpecEditor":
+        """
+        Set a value in the OpenAPI spec at the specified path.
+
+        Args:
+            keys (List[str]): A list of keys representing the path to set the value.
+            value (Any): The value to set at the specified path.
+
+        Returns:
+            OpenAPISpecEditor: Returns self for method chaining.
+        """
+        part = self.openapi_spec
+        for key in keys[:-1]:
+            if key not in part or not isinstance(part[key], dict):
+                part[key] = {}
+            part = part[key]
+        part[keys[-1]] = value
+        return self 
+    
     def to_yaml(self) -> str:
         """Return the OpenAPI specification as a YAML-formatted string."""
         if self.openapi_spec:

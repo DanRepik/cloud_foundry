@@ -1,9 +1,13 @@
 import pytest
 import boto3
 import json
+import pulumi
+import pulumi_aws as aws
 import uuid
 from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
-from tests.automation_helpers import deploy_stack_no_teardown
+from cloud_foundry import resource_id
+from cloud_foundry import site_bucket
+from tests.automation_helpers import deploy_stack
 
 @pytest.fixture
 def simple_hello_spec():
@@ -64,18 +68,33 @@ def simple_goodbye_spec():
 
 def s3_deployment():
     def pulumi_program():
-        import pulumi
-        from cloud_foundry import site_bucket
-        import uuid
         bucket = site_bucket(
-            name="test-bucket")
+            name="test-bucket",
+            bucket_name=f"{resource_id('test-bucket')}-{uuid.uuid4()}")
+        
+        # Upload a file to the bucket
+        test_object = aws.s3.BucketObject(
+            "test-object",
+            bucket=bucket.bucket_name,
+            key="test-upload.txt",
+            content="Hello from Pulumi!",
+        )
+
+        # Upload a file to a folder in the bucket
+        folder_key = "test-folder/"
+#        file_in_folder = aws.s3.BucketObject(
+#            "test-folder-object",
+#            bucket=bucket.bucket_name,
+#            key=f"{folder_key}test-file.txt",
+#            content="File inside a folder!",
+#        )
         pulumi.export("bucket_name", bucket.bucket_name) 
 
     return pulumi_program
 
 @pytest.fixture(scope="module")
 def simple_s3_stack():
-    yield from deploy_stack_no_teardown("cf-test", "simple-s3", s3_deployment())
+    yield from deploy_stack("cf-test", "simple-s3", s3_deployment())
 
 
 def test_add_token_validator(simple_hello_spec):

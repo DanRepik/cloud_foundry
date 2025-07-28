@@ -6,6 +6,7 @@ import requests
 import os
 import dotenv
 from cloud_foundry import python_function, rest_api
+from tests.automation_helpers import deploy_stack
 
 log = logging.getLogger(__name__)
 dotenv.load_dotenv()
@@ -43,43 +44,6 @@ def security_services_pulumi():
         pulumi.export("token-validator", security_api.token_validator.function_name)
 
     return pulumi_program
-
-
-def deploy_stack(project_name, stack_name, pulumi_program):
-    # Create or select the stack
-    stack = auto.create_or_select_stack(
-        stack_name=stack_name,
-        project_name=project_name,
-        program=pulumi_program,
-    )
-    try:
-        # Deploy the stack
-        print("Deploying Pulumi stack...")
-        up_result = stack.up()
-        print(f"Deployment complete: {up_result.summary.resource_changes}")
-
-        yield stack, up_result.outputs
-    finally:
-        print("Destroying Pulumi stack...")
-        stack.destroy()
-        print("Stack destroyed.")
-
-        stack.workspace.remove_stack(stack_name)
-
-
-def deploy_pulumi_stack_no_teardown(project_name, stack_name, pulumi_program):
-    # Create or select the stack
-    stack = auto.create_or_select_stack(
-        stack_name=stack_name,
-        project_name=project_name,
-        program=pulumi_program,
-    )
-    # Deploy the stack
-    print("Deploying Pulumi stack...")
-    up_result = stack.up()
-    print(f"Deployment complete: {up_result.summary.resource_changes}")
-
-    yield stack, up_result.outputs
 
 
 @pytest.fixture
