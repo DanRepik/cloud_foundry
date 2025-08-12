@@ -2,6 +2,7 @@
 
 import pulumi
 import pulumi_aws as aws
+from typing import Union
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.names import resource_id
 
@@ -21,7 +22,7 @@ class Function(pulumi.ComponentResource):
         handler: str = None,
         timeout: int = None,
         memory_size: int = None,
-        environment: dict[str, str] = None,
+        environment: dict[str, Union[str, pulumi.Output[str]]] = None,
         policy_statements: list = None,
         vpc_config: dict = None,
         use_parameter_store: bool = False,
@@ -144,7 +145,7 @@ class Function(pulumi.ComponentResource):
         )
 
         # Build policy statements
-        policy_statements = [
+        base_policy_statements = [
             aws.iam.GetPolicyDocumentStatementArgs(
                 effect="Allow",
                 actions=[
@@ -156,54 +157,80 @@ class Function(pulumi.ComponentResource):
             )
         ]
 
-        # Add user-defined policy statements
-        for statement in self.policy_statements:
-            if isinstance(statement, dict):
-                log.info(f"Adding user-defined policy statement: {statement}")
-                policy_statements.append(
-                    aws.iam.GetPolicyDocumentStatementArgs(
-                        effect=statement.get("Effect", "Allow"),
-                        actions=statement["Actions"],
-                        resources=statement["Resources"],
+        # Handle user-defined policy statements - they might be a Pulumi Output
+        def build_policy_statements(user_statements):
+            policy_statements = base_policy_statements.copy()
+            
+            # Add user-defined policy statements
+            for statement in user_statements:
+                if isinstance(statement, str):
+                    # Parse JSON string to dict
+                    import json
+                    statement = json.loads(statement)
+                
+                if isinstance(statement, dict):
+                    log.info(f"Adding user-defined policy statement: {statement}")
+                    policy_statements.append(
+                        aws.iam.GetPolicyDocumentStatementArgs(
+                            effect=statement.get("Effect", "Allow"),
+                            actions=statement["Actions"],
+                            resources=statement["Resources"],
+                        )
                     )
+            
+            # Add VPC-related permissions if VPC config is provided
+            if self.vpc_config:
+                policy_statements.extend(
+                    [
+                        aws.iam.GetPolicyDocumentStatementArgs(
+                            effect="Allow",
+                            actions=[
+                                "ec2:CreateNetworkInterface",
+                                "ec2:DescribeNetworkInterfaces",
+                                "ec2:DeleteNetworkInterface",
+                                "ec2:AssignPrivateIpAddresses",
+                                "ec2:UnassignPrivateIpAddresses",
+                            ],
+                            resources=["*"],
+                        ),
+                        aws.iam.GetPolicyDocumentStatementArgs(
+                            effect="Allow",
+                            actions=[
+                                "ec2:DescribeSubnets",
+                                "ec2:DescribeSecurityGroups",
+                                "ec2:DescribeVpcEndpoints",
+                            ],
+                            resources=["*"],
+                        ),
+                    ]
                 )
+            
+            return policy_statements
 
-        # Add VPC-related permissions if VPC config is provided
-        if self.vpc_config:
-            policy_statements.extend(
-                [
-                    aws.iam.GetPolicyDocumentStatementArgs(
-                        effect="Allow",
-                        actions=[
-                            "ec2:CreateNetworkInterface",
-                            "ec2:DescribeNetworkInterfaces",
-                            "ec2:DeleteNetworkInterface",
-                            "ec2:AssignPrivateIpAddresses",
-                            "ec2:UnassignPrivateIpAddresses",
-                        ],
-                        resources=["*"],
-                    ),
-                    aws.iam.GetPolicyDocumentStatementArgs(
-                        effect="Allow",
-                        actions=[
-                            "ec2:DescribeSubnets",
-                            "ec2:DescribeSecurityGroups",
-                            "ec2:DescribeVpcEndpoints",
-                        ],
-                        resources=["*"],
-                    ),
-                ]
+        # Check if policy_statements is a Pulumi Output
+        if isinstance(self.policy_statements, pulumi.Output):
+            # Use apply to handle the Output case
+            policy_statements = self.policy_statements.apply(build_policy_statements)
+        else:
+            # Handle the regular list case
+            policy_statements = build_policy_statements(self.policy_statements or [])
+
+        # Create the policy document - handle both Output and regular cases
+        if isinstance(policy_statements, pulumi.Output):
+            policy_document = policy_statements.apply(
+                lambda statements: aws.iam.get_policy_document(statements=statements)
             )
-
-        # Create the policy document
-        log.info(f"policy_statements: {policy_statements}")
-        policy_document = aws.iam.get_policy_document(statements=policy_statements)
+            policy_json = policy_document.apply(lambda doc: doc.json)
+        else:
+            log.info(f"policy_statements: {policy_statements}")
+            policy_document = aws.iam.get_policy_document(statements=policy_statements)
+            policy_json = policy_document.json
 
         # Attach the policy to the role
         aws.iam.RolePolicy(
             f"{self.name}-role-policy",
             role=role.id,
-            policy=policy_document.json,
+            policy=policy_json,
             opts=pulumi.ResourceOptions(depends_on=[role], parent=self),
         )
 

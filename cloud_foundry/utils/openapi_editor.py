@@ -126,7 +126,7 @@ class OpenAPISpecEditor:
                 raise KeyError(f"Part '{'.'.join(keys)}' does not exist in the spec.")
         return part
 
-    def get_spec_part(self, keys: List[str], create: bool = False) -> Optional[Any]:
+    def get_spec_part(self, keys: List[str], create: bool = False) -> Optional[Union[Dict, List, Any]]:
         try:
             return self.get_or_create_spec_part(keys, False)
         except KeyError:

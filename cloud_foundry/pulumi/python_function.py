@@ -1,5 +1,7 @@
 # python_function.py
 
+from typing import Union
+import pulumi
 from cloud_foundry.utils.logger import logger
 
 from cloud_foundry.python_archive_builder import PythonArchiveBuilder
@@ -17,7 +19,7 @@ def python_function(
     sources: dict[str, str] = None,
     requirements: list[str] = None,
     policy_statements: list[str] = None,
-    environment: dict[str, str] = None,
+    environment: dict[str, Union[str, pulumi.Output[str]]] = None,
     vpc_config: dict = None,
     runtime: str = None,
     opts=None,

@@ -339,9 +339,9 @@ class RestAPI(pulumi.ComponentResource):
             log.info("Setting up logging for API stage")
             log_group = aws.cloudwatch.LogGroup(
                 f"{self.name}-log",
-                name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}-log",
-                retention_in_days=7,
-                opts=pulumi.ResourceOptions(parent=self),
+                name=f"/aws/api/{pulumi.get_project()}/{pulumi.get_stack()}/{self.name}",
+                retention_in_days=3,
+                opts=pulumi.ResourceOptions(parent=self, retain_on_delete=False),
             )
             return aws.apigateway.Stage(
                 f"{self.name}-stage",
@@ -427,6 +427,7 @@ class RestAPI(pulumi.ComponentResource):
     def _create_cognito_permissions(self, invoke_arns: list[str]):
         """
         Create permissions for API Gateway to access Cognito user pools.
+        Handles both plain strings and Pulumi Output objects in invoke_arns.
         """
         log.info("Creating Cognito permissions for API Gateway")
         user_pool_arns = [
@@ -434,62 +435,72 @@ class RestAPI(pulumi.ComponentResource):
             for arn_slice in self.arn_alloc
             if arn_slice["type"] == "pool-validator"
         ]
+        # Flatten the list
         user_pool_arns = [arn for sublist in user_pool_arns for arn in sublist]
 
         if not user_pool_arns:
             return
 
-        # Define the policy document
-        cognito_policy = {
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Effect": "Allow",
-                    "Action": ["apigateway:POST"],
-                    "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers",
-                    "Condition": {
-                        "ArnLike": {
-                            "apigateway:CognitoUserPoolProviderArn": user_pool_arns
-                        }
+        def create_policy(user_pool_arns_resolved):
+            # Remove None and empty values
+            arns = [arn for arn in user_pool_arns_resolved if arn]
+            if not arns:
+                return
+
+            cognito_policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": ["apigateway:POST"],
+                        "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers",
+                        "Condition": {
+                            "ArnLike": {
+                                "apigateway:CognitoUserPoolProviderArn": arns
+                            }
+                        },
                     },
-                },
-                {
-                    "Effect": "Allow",
-                    "Action": ["apigateway:PATCH"],
-                    "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers/*",
-                    "Condition": {
-                        "ArnLike": {
-                            "apigateway:CognitoUserPoolProviderArn": user_pool_arns
-                        }
+                    {
+                        "Effect": "Allow",
+                        "Action": ["apigateway:PATCH"],
+                        "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers/*",
+                        "Condition": {
+                            "ArnLike": {
+                                "apigateway:CognitoUserPoolProviderArn": arns
+                            }
+                        },
                     },
-                },
-            ],
-        }
+                ],
+            }
 
-        # Create the IAM policy
-        cognito_policy_document = json.dumps(cognito_policy)
-        log.info(f"Creating Cognito permissions policy: {cognito_policy_document}")
+            cognito_policy_document = json.dumps(cognito_policy)
+            log.info(f"Creating Cognito permissions policy: {cognito_policy_document}")
 
-        cognito_policy_resource = aws.iam.Policy(
-            f"{self.name}-cognito-policy",
-            name=f"{self.name}-cognito-policy",
-            description="Policy for API Gateway to access Cognito user pools",
-            policy=cognito_policy_document,
-            opts=pulumi.ResourceOptions(parent=self),
-        )
-
-        # Attach the policy to the API Gateway role
-        gateway_role = self._get_gateway_role()
-        if gateway_role:
-            aws.iam.RolePolicyAttachment(
-                f"{self.name}-cognito-policy-attachment",
-                policy_arn=cognito_policy_resource.arn,
-                role=gateway_role.name,
+            cognito_policy_resource = aws.iam.Policy(
+                f"{self.name}-cognito-policy",
+                name=f"{self.name}-cognito-policy",
+                description="Policy for API Gateway to access Cognito user pools",
+                policy=cognito_policy_document,
                 opts=pulumi.ResourceOptions(parent=self),
             )
-            log.info(
-                f"Attached Cognito policy to API Gateway role: {gateway_role.name}"
-            )
+
+            gateway_role = self._get_gateway_role()
+            if gateway_role:
+                aws.iam.RolePolicyAttachment(
+                    f"{self.name}-cognito-policy-attachment",
+                    policy_arn=cognito_policy_resource.arn,
+                    role=gateway_role.name,
+                    opts=pulumi.ResourceOptions(parent=self),
+                )
+                log.info(
+                    f"Attached Cognito policy to API Gateway role: {gateway_role.name}"
+                )
+
+        # If any item is a Pulumi Output, use Output.all to resolve them
+        if any(isinstance(arn, pulumi.Output) for arn in user_pool_arns):
+            pulumi.Output.all(*user_pool_arns).apply(create_policy)
+        else:
+            create_policy(user_pool_arns)
 
     def _get_gateway_role(self):
         """
