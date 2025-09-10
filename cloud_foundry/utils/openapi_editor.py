@@ -127,7 +127,9 @@ class OpenAPISpecEditor:
                 raise KeyError(f"Part '{'.'.join(keys)}' does not exist in the spec.")
         return part
 
-    def get_spec_part(self, keys: List[str], create: bool = False) -> Optional[Union[Dict, List, Any]]:
+    def get_spec_part(
+        self, keys: List[str], create: bool = False
+    ) -> Optional[Union[Dict, List, Any]]:
         try:
             return self.get_or_create_spec_part(keys, False)
         except KeyError:
@@ -306,8 +308,8 @@ class OpenAPISpecEditor:
                 part[key] = {}
             part = part[key]
         part[keys[-1]] = value
-        return self 
-    
+        return self
+
     def to_yaml(self) -> str:
         """Return the OpenAPI specification as a YAML-formatted string."""
         if self.openapi_spec:

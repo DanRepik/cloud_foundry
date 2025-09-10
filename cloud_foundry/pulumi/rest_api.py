@@ -118,7 +118,7 @@ class RestAPI(pulumi.ComponentResource):
 
         log.info(f"registering outputs for {self.name} API")
         # Register outputs
-        pulumi.export(f"{self.name}_domain", self.domain)  
+        pulumi.export(f"{self.name}_domain", self.domain)
         pulumi.export(f"{self.name}_rest_api", self.rest_api.id)
         pulumi.export(f"{self.name}_stage", self.stage.stage_name)
 
@@ -314,7 +314,9 @@ class RestAPI(pulumi.ComponentResource):
         # Write the API specification to a local file
         with open(resource_id(f"{self.name}-rest-api.yaml"), "w") as file:
             file.write(self.editor.yaml)
-        log.info(f"API specification exported to file: {resource_id(f'{self.name}-rest-api.yaml')}")
+        log.info(
+            f"API specification exported to file: {resource_id(f'{self.name}-rest-api.yaml')}"
+        )
 
         log.info("Creating RestApi resource")
         return aws.apigateway.RestApi(
@@ -456,9 +458,7 @@ class RestAPI(pulumi.ComponentResource):
                         "Action": ["apigateway:POST"],
                         "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers",
                         "Condition": {
-                            "ArnLike": {
-                                "apigateway:CognitoUserPoolProviderArn": arns
-                            }
+                            "ArnLike": {"apigateway:CognitoUserPoolProviderArn": arns}
                         },
                     },
                     {
@@ -466,9 +466,7 @@ class RestAPI(pulumi.ComponentResource):
                         "Action": ["apigateway:PATCH"],
                         "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers/*",
                         "Condition": {
-                            "ArnLike": {
-                                "apigateway:CognitoUserPoolProviderArn": arns
-                            }
+                            "ArnLike": {"apigateway:CognitoUserPoolProviderArn": arns}
                         },
                     },
                 ],
