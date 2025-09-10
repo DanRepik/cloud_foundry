@@ -115,16 +115,12 @@ class RestAPI(pulumi.ComponentResource):
                 ".amazonaws.com/",
                 self.stage.stage_name,
             )
-        #        pulumi.export(f"{self.name}-domain", self.domain)
 
         log.info(f"registering outputs for {self.name} API")
         # Register outputs
-        self.register_outputs(
-            {
-                "rest_api_id": self.rest_api.id,
-                "stage_name": self.stage.stage_name,
-            }
-        )
+        pulumi.export(f"{self.name}_domain", self.domain)  
+        pulumi.export(f"{self.name}_rest_api", self.rest_api.id)
+        pulumi.export(f"{self.name}_stage", self.stage.stage_name)
 
     def _validate_token_validators(self):
         """
@@ -315,11 +311,16 @@ class RestAPI(pulumi.ComponentResource):
         self._create_lambda_permissions()
         self._create_cognito_permissions(invoke_arns)
 
+        # Write the API specification to a local file
+        with open(resource_id(f"{self.name}-rest-api.yaml"), "w") as file:
+            file.write(self.editor.yaml)
+        log.info(f"API specification exported to file: {resource_id(f'{self.name}-rest-api.yaml')}")
+
         log.info("Creating RestApi resource")
         return aws.apigateway.RestApi(
             self.name,
             name=resource_id(f"{self.name}-rest-api"),
-            body=self.editor.yaml,
+            body=self.api_spec,
             opts=pulumi.ResourceOptions(parent=self),
         )
 

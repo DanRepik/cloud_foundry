@@ -121,8 +121,9 @@ class OpenAPISpecEditor:
         for key in keys:
             if create and key not in part:
                 part[key] = {}
-            part = part.get(key)
-            if part is None:
+            if key in part:
+                part = part[key]
+            else:
                 raise KeyError(f"Part '{'.'.join(keys)}' does not exist in the spec.")
         return part
 
@@ -173,7 +174,7 @@ class OpenAPISpecEditor:
         # Check for `x-af-security` in the schema
         if schema_object and "x-af-security" in schema_object:
             operation["security"] = [
-                [{key: []} for key in schema_object["x-af-security"].keys()]
+                {key: []} for key in schema_object["x-af-security"].keys()
             ]
         else:
             # Use global security if `x-af-security` is not defined
@@ -319,3 +320,7 @@ class OpenAPISpecEditor:
     @property
     def yaml(self) -> str:
         return self.to_yaml()
+
+    @property
+    def json(self) -> str:
+        return json.dumps(self.openapi_spec, indent=2)
