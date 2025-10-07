@@ -1,12 +1,14 @@
-import pulumi
-from pulumi import automation as auto
 import pytest
 import logging
 import requests
-import os
 import dotenv
+from pathlib import Path
+
+import pulumi
+
 from cloud_foundry import python_function, rest_api
-from tests.automation_helpers import deploy_stack
+from fixture_foundry import deploy, to_localstack_url, localstack, container_network
+
 
 log = logging.getLogger(__name__)
 dotenv.load_dotenv()
@@ -15,22 +17,26 @@ dotenv.load_dotenv()
 # Define the Pulumi program
 def simple_greet_api():
     def pulumi_program():
-        greet_function = python_function(
-            "greet-function",
-            sources={"app.py": "./tests/resources/greet_api_service.py"},
+        resources_dir = Path(__file__).resolve().parent / "resources"
+        greet_code = (resources_dir / "greet_api_service.py").read_text(
+            encoding="utf-8"
         )
 
-        log.info(f"hosted_zone_id: {os.environ.get('HOSTED_ZONE_ID')}")
+        greet_function = python_function(
+            "greet-function",
+            sources={
+                "app.py": greet_code,  # file content, not a filesystem path
+            },
+        )
+
         greet_api = rest_api(
             "greet-api",
-            specification="./tests/resources/greet_api_spec.yaml",
+            specification=str(resources_dir / "greet_api_spec.yaml"),
             integrations=[
                 {"path": "/greet", "method": "get", "function": greet_function}
             ],
-            hosted_zone_id=os.environ.get("HOSTED_ZONE_ID"),
         )
 
-        log.info(f"domain: {vars(greet_api)}")
         pulumi.export("domain", greet_api.domain)
 
     return pulumi_program
@@ -47,31 +53,40 @@ def security_services_pulumi():
 
 
 @pytest.fixture
-def simple_greet_stack():
-    yield from deploy_stack("cf", "greet", simple_greet_api())
+def simple_greet_stack(request, localstack):
+    teardown = request.config.getoption("--teardown").lower() == "true"
+    with deploy(
+        "cf-test",
+        "simple-greet",
+        pulumi_program=simple_greet_api(),
+        localstack=localstack,
+        teardown=teardown,
+    ) as outputs:
+        yield outputs
 
 
-def test_no_auth(simple_greet_stack):
-    stack, outputs = simple_greet_stack
+def test_no_auth(simple_greet_stack, localstack):
+    outputs = simple_greet_stack
 
     # Validate the deployed service
-    domain = outputs.get("domain").value
-    assert domain is not None, "Invoke URL is missing."
+    edge_port = localstack.get("port", 4566)
+    greet_url = to_localstack_url(
+        f"http://{outputs.get('domain')}/greet", edge_port=edge_port
+    )
+    log.info("greet_url: %s", greet_url)
 
-    greet_url = f"https://{domain}/greet"
-    log.info(f"greet_url: {greet_url}")
-    response = requests.get(greet_url)
-    log.info(f"response: {response.text}")
+    response = requests.get(greet_url, timeout=5)
+    log.info("response: %s", response.text)
     assert response.status_code == 200, "Expected status code 200"
     assert (
         "Hello, World!" in response.text
     ), "Expected response body to contain 'Hello World!'"
 
-    greet_url = f"https://{domain}/greet?name=Bob"
-    log.info(f"greet_url: {greet_url}")
-    response = requests.get(greet_url)
-    log.info(f"response: {response.text}")
+    greet_url = f"{greet_url}?name=Bob"
+    log.info("greet_url: %s", greet_url)
+    response = requests.get(greet_url, timeout=5)
+    log.info("response: %s", response.text)
     assert response.status_code == 200, "Expected status code 200"
     assert (
         "Hello, Bob!" in response.text
-    ), "Expected response body to contain 'Hello World!'"
+    ), "Expected response body to contain 'Hello, Bob!'"

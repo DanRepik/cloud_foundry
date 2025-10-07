@@ -150,7 +150,9 @@ def test_get_spec_part_missing():
 def test_get_operation_and_add_operation():
     editor = OpenAPISpecEditor()
     op = {"summary": "Test operation"}
-    editor.add_operation("/foo", "get", op)
+    editor.add_operation(
+        path="/foo", method="get", schema_name="schema_name", operation=op
+    )
     result = editor.get_operation("/foo", "get")
     assert result["summary"] == "Test operation"
 
@@ -165,13 +167,15 @@ def test_add_operation_uses_global_security():
     }
     editor = OpenAPISpecEditor(spec)
     op = {"summary": "Global security"}
-    editor.add_operation("/glob", "put", op)
+    editor.add_operation(
+        path="/glob", method="put", schema_name="schema_name", operation=op
+    )
     result = editor.get_operation("/glob", "put")
     assert "security" in result
-    assert result["security"] == [[{"globalAuth": []}]]
+    assert result["security"] == [{"globalAuth": []}]
 
 
-def test_remove_attributes_by_pattern():
+def test_remove_attributes_with_pattern():
     spec = {
         "openapi": "3.0.3",
         "info": {"title": "Test", "version": "1.0.0"},
@@ -185,7 +189,7 @@ def test_remove_attributes_by_pattern():
         "x-top": "remove",
     }
     editor = OpenAPISpecEditor(spec)
-    editor.remove_attributes_by_pattern(r"^x-")
+    editor.remove_attributes_with_pattern(r"^x-")
     assert "x-top" not in editor.openapi_spec
     assert "x-remove-me" not in editor.openapi_spec["paths"]["/foo"]["get"]
     assert "summary" in editor.openapi_spec["paths"]["/foo"]["get"]
@@ -193,7 +197,7 @@ def test_remove_attributes_by_pattern():
 
 def test_to_yaml_and_yaml_property():
     editor = OpenAPISpecEditor()
-    yml = editor.to_yaml()
+    yml = editor.yaml
     print(f"YAML output:\n{yml}")
     assert "openapi: 3.0.3" in yml
     assert editor.yaml == yml

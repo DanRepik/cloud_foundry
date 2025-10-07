@@ -234,7 +234,7 @@ publisher_function = cloud_foundry.python_function(
     environment={"MAIL_ORIGIN": mail_origin},
 )
 
-pulumi.export("function_name", publisher_function.function_name)
+self.register_outputs({"function_name", publisher_function.function_name})
 ```
 
 ### Lambda Service Code

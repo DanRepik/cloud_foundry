@@ -1,15 +1,18 @@
 import pytest
 import boto3
 import json
+import uuid
+import yaml
+
 import pulumi
 import pulumi_aws as aws
-import uuid
-from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
-from cloud_foundry import resource_id
-from cloud_foundry import site_bucket
-from tests.automation_helpers import deploy_stack
 
-@pytest.fixture
+from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
+from cloud_foundry import site_bucket
+
+from fixture_foundry import deploy, localstack, container_network
+
+
 def simple_hello_spec():
     return {
         "openapi": "3.0.3",
@@ -25,7 +28,9 @@ def simple_hello_spec():
                                 "application/json": {
                                     "schema": {
                                         "type": "object",
-                                        "properties": {"message": {"type": "string"}},
+                                        "properties": {
+                                            "message": {"type": "string"}
+                                        },  # noqa: E501
                                     }
                                 }
                             },
@@ -38,7 +43,23 @@ def simple_hello_spec():
     }
 
 
-@pytest.fixture
+# Ensure boto3 inside AWSOpenAPISpecEditor talks to LocalStack
+@pytest.fixture(autouse=True)
+def boto3_uses_localstack(monkeypatch, localstack):
+    # Prefer service-specific endpoint var if supported; fall back to global
+    monkeypatch.setenv("AWS_S3_ENDPOINT_URL", localstack["endpoint_url"])
+    # botocore >= 1.31 supports AWS_ENDPOINT_URL
+    monkeypatch.setenv("AWS_ENDPOINT_URL", localstack["endpoint_url"])  # noqa: E501
+    monkeypatch.setenv("AWS_DEFAULT_REGION", localstack["region"])
+    # Dummy creds for LocalStack
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    # Avoid metadata lookups slowing tests
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    # Path-style S3 addressing is safest across LocalStack setups
+    monkeypatch.setenv("AWS_S3_ADDRESSING_STYLE", "path")
+
+
 def simple_goodbye_spec():
     return {
         "openapi": "3.0.3",
@@ -54,7 +75,9 @@ def simple_goodbye_spec():
                                 "application/json": {
                                     "schema": {
                                         "type": "object",
-                                        "properties": {"farewell": {"type": "string"}},
+                                        "properties": {
+                                            "farewell": {"type": "string"}
+                                        },  # noqa: E501
                                     }
                                 }
                             },
@@ -66,41 +89,77 @@ def simple_goodbye_spec():
         "components": {"schemas": {}, "securitySchemes": {}},
     }
 
+
 def s3_deployment():
     def pulumi_program():
         bucket = site_bucket(
             name="test-bucket",
-            bucket_name=f"{resource_id('test-bucket')}-{uuid.uuid4()}")
-        
-        # Upload a file to the bucket
-        test_object = aws.s3.BucketObject(
-            "test-object",
-            bucket=bucket.bucket_name,
-            key="test-upload.txt",
-            content="Hello from Pulumi!",
+            bucket_name=f"test-bucket-{uuid.uuid4()}",
         )
 
-        # Upload a file to a folder in the bucket
+        # If site_bucket returns a component whose bucket_name is NOT an
+        # Output, force the dependency using depends_on.
+        aws.s3.BucketObject(
+            "test-object",
+            bucket=bucket.bucket_name,
+            key="hello.json",
+            content=json.dumps(simple_hello_spec()),
+            opts=pulumi.ResourceOptions(depends_on=[bucket]),
+        )
+
         folder_key = "test-folder/"
-#        file_in_folder = aws.s3.BucketObject(
-#            "test-folder-object",
-#            bucket=bucket.bucket_name,
-#            key=f"{folder_key}test-file.txt",
-#            content="File inside a folder!",
-#        )
-        pulumi.export("bucket_name", bucket.bucket_name) 
+        aws.s3.BucketObject(
+            "test-hello-object",
+            bucket=bucket.bucket_name,
+            key=f"{folder_key}hello.yaml",
+            content=yaml.dump(simple_hello_spec()),
+            opts=pulumi.ResourceOptions(depends_on=[bucket]),
+        )
+
+        aws.s3.BucketObject(
+            "test-goodbye-object",
+            bucket=bucket.bucket_name,
+            key=f"{folder_key}goodbye.yaml",
+            content=yaml.dump(simple_goodbye_spec()),
+            opts=pulumi.ResourceOptions(depends_on=[bucket]),
+        )
+
+        pulumi.export("bucket_name", bucket.bucket_name)
 
     return pulumi_program
 
+
 @pytest.fixture(scope="module")
-def simple_s3_stack():
-    yield from deploy_stack("cf-test", "simple-s3", s3_deployment())
+def simple_s3_stack(request, localstack):
+
+    teardown = request.config.getoption("--teardown").lower() == "true"
+    with deploy(
+        "cf-test",
+        "simple-s3",
+        s3_deployment(),
+        localstack=localstack,
+        teardown=teardown,
+    ) as outputs:
+        yield outputs
 
 
-def test_add_token_validator(simple_hello_spec):
-    editor = AWSOpenAPISpecEditor(simple_hello_spec)
+@pytest.fixture
+def s3_client(localstack):
+    return boto3.client(
+        "s3",
+        region_name=localstack["region"],
+        endpoint_url=localstack["endpoint_url"],
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+
+
+def test_add_token_validator():
+    editor = AWSOpenAPISpecEditor(simple_hello_spec())
     editor.add_token_validator(
-        "myAuth", "myFunc", "arn:aws:lambda:us-east-1:123456789012:function:myFunc"
+        "myAuth",
+        "myFunc",
+        "arn:aws:lambda:us-east-1:123456789012:function:myFunc",  # noqa: E501
     )
     assert "myAuth" in editor.openapi_spec["components"]["securitySchemes"]
     scheme = editor.openapi_spec["components"]["securitySchemes"]["myAuth"]
@@ -108,16 +167,18 @@ def test_add_token_validator(simple_hello_spec):
     assert scheme["x-amazon-apigateway-authorizer"]["type"] == "token"
 
 
-def test_add_user_pool_validator(simple_hello_spec):
-    editor = AWSOpenAPISpecEditor(simple_hello_spec)
-    arns = ["arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_ABC123"]
+def test_add_user_pool_validator():
+    editor = AWSOpenAPISpecEditor(simple_hello_spec())
+    arns = [
+        "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_ABC123"  # noqa: E501
+    ]
     editor.add_user_pool_validator("cognitoAuth", arns)
     scheme = editor.openapi_spec["components"]["securitySchemes"]["cognitoAuth"]
     assert scheme["x-amazon-apigateway-authorizer"]["providerARNs"] == arns
 
 
-def test_add_integration(simple_hello_spec):
-    editor = AWSOpenAPISpecEditor(simple_hello_spec)
+def test_add_integration():
+    editor = AWSOpenAPISpecEditor(simple_hello_spec())
     editor.openapi_spec["paths"]["/test"] = {"get": {}}
     editor.add_integration(
         "/hello",
@@ -198,36 +259,25 @@ def test_remove_unintegrated_operations():
     assert "post" not in editor.openapi_spec["paths"]["/foo"]
     assert "/bar" not in editor.openapi_spec["paths"]
 
-def test_retrieve_file_from_s3(simple_s3_stack, simple_hello_spec):
+
+def test_retrieve_file_from_s3(simple_s3_stack):
     # Get the bucket name from the Pulumi stack outputs
-    context, outputs = simple_s3_stack
+    outputs = simple_s3_stack
     print(f"outputs: {outputs}")
-    bucket_name = outputs["bucket_name"].value
+    bucket_name = outputs["bucket_name"]
 
-    # Create the S3 client
-    s3 = boto3.client("s3")
+    editor = AWSOpenAPISpecEditor(f"s3://{bucket_name}/hello.json")
+    print(f"editor: {editor.yaml}")
+    assert editor.openapi_spec["paths"]["/hello"]["get"] is not None
 
-    # Upload a test file to the bucket
-    test_key = f"test-folder/test-file-{uuid.uuid4().hex}.txt"
-    test_content = json.dumps(simple_hello_spec)
-    s3.put_object(Bucket=bucket_name, Key=test_key, Body=test_content)
 
-    editor = AWSOpenAPISpecEditor(f"s3://{bucket_name}/{test_key}")
-    print(f"editor: {editor.to_yaml}")
+def test_retrieve_folder_from_s3(simple_s3_stack):
+    # Get the bucket name from the Pulumi stack outputs
+    outputs = simple_s3_stack
+    print(f"outputs: {outputs}")
+    bucket_name = outputs["bucket_name"]
 
-def test_list_folder_from_s3(simple_s3_stack):
-    context, outputs = simple_s3_stack
-    bucket_name = outputs["bucket_name"].value
-    s3 = boto3.client("s3")
-
-    # Upload multiple files to a folder
-    folder = f"folder-{uuid.uuid4().hex}/"
-    keys = [f"{folder}file1.txt", f"{folder}file2.txt", f"{folder}file3.txt"]
-    for key in keys:
-        s3.put_object(Bucket=bucket_name, Key=key, Body=b"data")
-
-    # List objects in the folder
-    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=folder)
-    returned_keys = [obj["Key"] for obj in response.get("Contents", [])]
-    for key in keys:
-        assert key in returned_keys
+    editor = AWSOpenAPISpecEditor(f"s3://{bucket_name}/test-folder/")
+    print(f"editor: {editor.yaml}")
+    assert editor.openapi_spec["paths"]["/hello"]["get"] is not None
+    assert editor.openapi_spec["paths"]["/goodbye"]["get"] is not None

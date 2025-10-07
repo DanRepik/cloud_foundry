@@ -3,6 +3,7 @@ pulumi
 pulumi-aws
 
 # testing packages
+docker
 pulumi-automation
 pytest
 pytest-cov
@@ -18,3 +19,6 @@ flake8
 black
 build
 twine
+
+fixture_foundry
+psycopg2-binary

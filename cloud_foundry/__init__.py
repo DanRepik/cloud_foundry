@@ -5,7 +5,6 @@ from cloud_foundry.pulumi.function import function  # noqa: F401
 from cloud_foundry.pulumi.python_function import python_function  # noqa: F401
 from cloud_foundry.pulumi.rest_api import RestAPI  # noqa: F401
 from cloud_foundry.pulumi.rest_api import rest_api  # noqa: F401
-from cloud_foundry.utils.localstack import is_localstack_deployment  # noqa: F401
 
 from cloud_foundry.utils.openapi_editor import OpenAPISpecEditor  # noqa: F401
 from cloud_foundry.pulumi.site_bucket import site_bucket  # noqa: F401

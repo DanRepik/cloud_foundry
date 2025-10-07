@@ -29,8 +29,11 @@ class OpenAPISpecEditor:
             "paths": {},
             "components": {"schemas": {}, "securitySchemes": {}},
         }
-        self._yaml = None
         self.merge_spec_item(spec)
+
+    @property
+    def yaml(self) -> str:
+        return yaml.dump(self.openapi_spec, sort_keys=False)
 
     def _deep_merge(
         self, source: Dict[Any, Any], destination: Dict[Any, Any] = None
@@ -160,169 +163,127 @@ class OpenAPISpecEditor:
         path: str,
         method: str,
         operation: dict,
+        schema_name: str,
         schema_object: Optional[dict] = None,
     ):
         """
         Add an operation to the OpenAPI spec with optional security handling.
 
-        Args:
-            path (str): The API path.
-            method (str): The HTTP method.
-            operation (dict): The operation definition.
-            schema_object (Optional[dict]): The schema object to check for
-            `x-af-security`.
-        """
-
-        # Check for `x-af-security` in the schema
-        if schema_object and "x-af-security" in schema_object:
-            operation["security"] = [
-                {key: []} for key in schema_object["x-af-security"].keys()
-            ]
-        else:
-            # Use global security if `x-af-security` is not defined
-            global_security = self.get_spec_part(["security"])
-            if global_security:
-                operation["security"] = [global_security]
-
-        # Retrieve the operation
-        path = self.get_or_create_spec_part(["paths", path], True)
-        path[method] = operation
-
-        return self
-
-    def add_operation_attribute(
-        self, path: str, method: str, attribute: str, value
-    ) -> "OpenAPISpecEditor":
-        """
-        Add an attribute to a specific operation and return self for chaining.
+        If the schema_object contains x-af-security (role -> permissions mapping),
+        roles are converted into OAuth2-style scopes under a single security scheme.
+        The operation.security becomes: [{scheme_name: [role1, role2, ...]}]
 
         Args:
-            path (str): The API path (e.g., "/token").
-            method (str): The HTTP method (e.g., "post").
-            attribute (str): The name of the attribute to add.
-            value: The value of the attribute to add.
-
-        Returns:
-            OpenAPISpecEditor: Returns the instance for chaining.
+            path (str): API path (e.g. "/items")
+            method (str): HTTP method (e.g. "get")
+            operation (dict): Operation object
+            schema_object (Optional[dict]): Schema carrying x-af-security
+            scheme_name (str): Name of the security scheme to apply
         """
-        # Retrieve the operation
-        operation = self.get_operation(path, method)
+        method = method.lower()
 
-        # Add or update the attribute in the operation
-        operation[attribute] = value
+        # Only set security if caller did not already provide one.
+        if "security" not in operation:
+            roles_security = None
 
-        # Return self to allow method chaining
+            if schema_object and "x-af-security" in schema_object:
+                role_map = schema_object["x-af-security"] or {}
+                roles = list(role_map.keys())
+
+                # Ensure securitySchemes entry exists / is oauth2 with scopes.
+                self._ensure_oauth2_scheme_with_scopes(schema_name, roles, role_map)
+
+                # Convert roles -> scopes for this operation
+                roles_security = [{schema_name: roles}] if roles else None
+
+                # Preserve original role permission matrix as an extension
+                operation["x-af-security"] = role_map
+
+            if roles_security:
+                operation["security"] = roles_security
+            else:
+                # Fallback to global security (already a list of Security Requirement Objects)
+                global_security = self.get_spec_part(["security"])
+                if isinstance(global_security, list):
+                    # Shallow copy to avoid accidental mutation
+                    operation["security"] = list(global_security)
+
+        # Insert / update operation in the paths map
+        path_dict = self.get_or_create_spec_part(["paths", path], True)
+        path_dict[method] = operation
         return self
 
-    def remove_attributes_by_pattern(self, pattern: str) -> None:
+    def _ensure_oauth2_scheme_with_scopes(
+        self,
+        scheme_name: str,
+        roles: List[str],
+        role_map: Dict[str, Any],
+        token_url: str = "https://example.com/oauth2/token",
+    ) -> None:
         """
-        Remove all attributes in the OpenAPI specification that match the
+        Ensure an oauth2 security scheme with clientCredentials flow exists and
+        contains the provided roles as scopes. If the scheme exists and already
+        defines scopes, new ones are merged (idempotent).
+        """
+        security_schemes = self.get_or_create_spec_part(
+            ["components", "securitySchemes"], create=True
+        )
+
+        scheme = security_schemes.get(scheme_name)
+        if not scheme or scheme.get("type") != "oauth2":
+            # (Re)define as oauth2 client credentials flow
+            security_schemes[scheme_name] = {
+                "type": "oauth2",
+                "flows": {
+                    "clientCredentials": {
+                        "tokenUrl": token_url,
+                        "scopes": {},
+                    }
+                },
+                "description": "Auto-generated OAuth2 scheme (roles mapped to scopes).",
+            }
+            scheme = security_schemes[scheme_name]
+
+        flows = scheme.setdefault("flows", {}).setdefault(
+            "clientCredentials",
+            {"tokenUrl": token_url, "scopes": {}},
+        )
+        scopes = flows.setdefault("scopes", {})
+
+        # Merge role scopes with basic description (use permission summary if present)
+        for role in roles:
+            if role not in scopes:
+                perms = role_map.get(role, {})
+                # Build a concise description of permissions if dict
+                if isinstance(perms, dict):
+                    perms_desc = (
+                        ", ".join(f"{k}:{v}" for k, v in perms.items()) or "role scope"
+                    )
+                else:
+                    perms_desc = "role scope"
+                scopes[role] = f"Access for role '{role}'"
+
+    def remove_attributes_with_pattern(
+        self, pattern: str, obj: Optional[Union[Dict, List]] = None
+    ) -> None:
+        """
+        Recursively remove all attributes from the OpenAPI spec that match the
         provided regex pattern.
 
         Args:
-            pattern (str): A regex pattern to match keys in the OpenAPI spec.
-
-        Returns:
-            None
+            pattern (str): The regex pattern to match attribute names.
+            obj (Optional[Union[Dict, List]]): The object to process. If None,
+            starts with the root OpenAPI spec.
         """
-        compiled_pattern = re.compile(pattern)
+        if obj is None:
+            obj = self.openapi_spec
 
-        def remove_matching_keys(data: Union[Dict, List]) -> Union[Dict, List]:
-            """Recursively remove keys matching the regex pattern."""
-            if isinstance(data, dict):
-                return {
-                    key: remove_matching_keys(value)
-                    for key, value in data.items()
-                    if not compiled_pattern.match(key)
-                }
-            elif isinstance(data, list):
-                return [remove_matching_keys(item) for item in data]
-            return data
-
-        self.openapi_spec = remove_matching_keys(self.openapi_spec)
-        log.info(f"Attributes matching '{pattern}' have been removed from the spec.")
-
-    def prune(self, keys: List[str]) -> Any:
-        """
-        Remove the attribute specified by the path list from the OpenAPI spec and return the pruned element.
-
-        Args:
-            keys (List[str]): A list of keys representing the path to the attribute to remove.
-
-        Returns:
-            Any: The pruned element if found and removed, otherwise None.
-        """
-        if not keys:
-            return None
-        part = self.openapi_spec
-        for key in keys[:-1]:
-            if key in part and isinstance(part[key], dict):
-                part = part[key]
-            else:
-                log.warning(f"Path '{'.'.join(keys)}' does not exist in the spec.")
-                return None
-        removed = part.pop(keys[-1], None)
-        if removed is not None:
-            log.info(f"Attribute '{'.'.join(keys)}' has been pruned from the spec.")
-        else:
-            log.warning(f"Attribute '{'.'.join(keys)}' not found for pruning.")
-        return removed
-        """
-        Remove the attribute specified by the path list from the OpenAPI spec.
-
-        Args:
-            keys (List[str]): A list of keys representing the path to the attribute to remove.
-
-        Returns:
-            None
-        """
-        if not keys:
-            return
-        part = self.openapi_spec
-        for key in keys[:-1]:
-            if key in part and isinstance(part[key], dict):
-                part = part[key]
-            else:
-                log.warning(f"Path '{'.'.join(keys)}' does not exist in the spec.")
-                return
-        removed = part.pop(keys[-1], None)
-        if removed is not None:
-            log.info(f"Attribute '{'.'.join(keys)}' has been pruned from the spec.")
-        else:
-            log.warning(f"Attribute '{'.'.join(keys)}' not found for pruning.")
-
-    def set(self, keys: List[str], value: Any) -> "OpenAPISpecEditor":
-        """
-        Set a value in the OpenAPI spec at the specified path.
-
-        Args:
-            keys (List[str]): A list of keys representing the path to set the value.
-            value (Any): The value to set at the specified path.
-
-        Returns:
-            OpenAPISpecEditor: Returns self for method chaining.
-        """
-        part = self.openapi_spec
-        for key in keys[:-1]:
-            if key not in part or not isinstance(part[key], dict):
-                part[key] = {}
-            part = part[key]
-        part[keys[-1]] = value
-        return self
-
-    def to_yaml(self) -> str:
-        """Return the OpenAPI specification as a YAML-formatted string."""
-        if self.openapi_spec:
-            self._yaml = yaml.dump(self.openapi_spec)
-        else:
-            log.warning("OpenAPI spec is empty, returning empty YAML.")
-            self._yaml = ""
-        return self._yaml
-
-    @property
-    def yaml(self) -> str:
-        return self.to_yaml()
-
-    @property
-    def json(self) -> str:
-        return json.dumps(self.openapi_spec, indent=2)
+        if isinstance(obj, dict):
+            keys_to_remove = [key for key in obj if re.match(pattern, key)]
+            for key in keys_to_remove:
+                del obj[key]
+            for value in obj.values():
+                self.remove_attributes_with_pattern(pattern, value)
+        elif isinstance(obj, list):
+            for item in obj:
+                self.remove_attributes_with_pattern(pattern, item)
