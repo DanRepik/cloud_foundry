@@ -148,7 +148,8 @@ class CustomGatewayDomain(CustomCertificate):
             opts=pulumi.ResourceOptions(parent=self, depends_on=[custom_domain]),
         )
 
-        pulumi.export(
-            f"{name}-custom-domain-name",
-            custom_domain.domain_name,
+        self.register_outputs(
+            {
+                "domain": custom_domain.domain_name,
+            }
         )

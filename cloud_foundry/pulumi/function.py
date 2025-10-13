@@ -2,6 +2,7 @@
 
 import pulumi
 import pulumi_aws as aws
+from typing import Union
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.names import resource_id
 
@@ -21,9 +22,10 @@ class Function(pulumi.ComponentResource):
         handler: str = None,
         timeout: int = None,
         memory_size: int = None,
-        environment: dict[str, str] = None,
+        environment: dict[str, Union[str, pulumi.Output[str]]] = None,
         policy_statements: list = None,
         vpc_config: dict = None,
+        use_parameter_store: bool = False,
         opts=None,
     ):
         super().__init__("cloud_foundry:lambda:Function", name, {}, opts)
@@ -37,7 +39,8 @@ class Function(pulumi.ComponentResource):
         self.timeout = timeout
         self.policy_statements = policy_statements or []
         self.vpc_config = vpc_config or {}
-        self._function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
+        self.function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
+        self.log_group_name = f"/aws/lambda/{self.function_name}"
         # Validate that the environment is a dictionary with string keys and values
         if not isinstance(self.environment, dict) or not all(
             isinstance(k, str) and (isinstance(v, str) or isinstance(v, pulumi.Output))
@@ -50,7 +53,7 @@ class Function(pulumi.ComponentResource):
 
         # Import existing Lambda function if no creation parameters are provided
         if not archive_location and not hash and not runtime and not handler:
-            log.info(f"Importing existing Lambda function: {self._function_name}")
+            log.info(f"Importing existing Lambda function: {self.function_name}")
             self.lambda_ = aws.lambda_.Function.get(
                 f"{self.name}-lambda",
                 self.name,
@@ -67,16 +70,8 @@ class Function(pulumi.ComponentResource):
     def invoke_arn(self) -> pulumi.Output[str]:
         return self.lambda_.invoke_arn
 
-    @property
-    def function_name(self) -> pulumi.Output[str]:
-        return self.lambda_.name
-
-    @property
-    def log_group_name(self) -> pulumi.Output[str]:
-        return pulumi.Output.concat("/aws/lambda/", self.lambda_.name)
-
     def _create_lambda_function(self) -> aws.lambda_.Function:
-        log.info(f"Creating Lambda function: {self._function_name}")
+        log.info(f"Creating Lambda function: {self.function_name}")
 
         # Create the execution role
         execution_role = self.create_execution_role()
@@ -89,11 +84,19 @@ class Function(pulumi.ComponentResource):
                 security_group_ids=self.vpc_config.get("security_group_ids", []),
             )
 
+        # Set the retention time for the function logs
+        log_group = aws.cloudwatch.LogGroup(
+            f"{self.name}-log-group",
+            name=self.log_group_name,
+            retention_in_days=3,  # Set the retention period in days
+            opts=pulumi.ResourceOptions(retain_on_delete=False),
+        )
+
         # Create the Lambda function
         self.lambda_ = aws.lambda_.Function(
             f"{self.name}-function",
             code=pulumi.FileArchive(self.archive_location),
-            name=self._function_name,
+            name=self.function_name,
             role=execution_role.arn,
             memory_size=self.memory_size,
             timeout=self.timeout,
@@ -102,28 +105,20 @@ class Function(pulumi.ComponentResource):
             runtime=self.runtime or aws.lambda_.Runtime.PYTHON3D9,
             environment=aws.lambda_.FunctionEnvironmentArgs(variables=self.environment),
             vpc_config=vpc_config_args,
-            opts=pulumi.ResourceOptions(depends_on=[execution_role], parent=self),
-        )
-
-        # Set the retention time for the function logs
-        aws.cloudwatch.LogGroup(
-            f"{self.name}-log-group",
-            name=self.log_group_name,
-            retention_in_days=3,  # Set the retention period in days
-            opts=pulumi.ResourceOptions(parent=self.lambda_),
+            opts=pulumi.ResourceOptions(depends_on=[execution_role, log_group], parent=self),
         )
 
         # Register outputs
         self.register_outputs(
             {
                 "invoke_arn": self.lambda_.invoke_arn,
-                "function_name": self._function_name,
-                "log_group_name": f"/aws/lambda/{self._function_name}",
+                "function_name": self.function_name,
+                "log_group_name": self.log_group_name,
             }
         )
 
     def create_execution_role(self) -> aws.iam.Role:
-        log.info(f"Creating execution role for Lambda function: {self._function_name}")
+        log.info(f"Creating execution role for Lambda function: {self.function_name}")
 
         # Define the assume role policy
         assume_role_policy = aws.iam.get_policy_document(
@@ -150,7 +145,7 @@ class Function(pulumi.ComponentResource):
         )
 
         # Build policy statements
-        policy_statements = [
+        base_policy_statements = [
             aws.iam.GetPolicyDocumentStatementArgs(
                 effect="Allow",
                 actions=[
@@ -162,54 +157,80 @@ class Function(pulumi.ComponentResource):
             )
         ]
 
-        # Add user-defined policy statements
-        for statement in self.policy_statements:
-            if isinstance(statement, dict):
-                log.info(f"Adding user-defined policy statement: {statement}")
-                policy_statements.append(
-                    aws.iam.GetPolicyDocumentStatementArgs(
-                        effect=statement.get("Effect", "Allow"),
-                        actions=statement["Actions"],
-                        resources=statement["Resources"],
+        # Handle user-defined policy statements - they might be a Pulumi Output
+        def build_policy_statements(user_statements):
+            policy_statements = base_policy_statements.copy()
+            
+            # Add user-defined policy statements
+            for statement in user_statements:
+                if isinstance(statement, str):
+                    # Parse JSON string to dict
+                    import json
+                    statement = json.loads(statement)
+                
+                if isinstance(statement, dict):
+                    log.info(f"Adding user-defined policy statement: {statement}")
+                    policy_statements.append(
+                        aws.iam.GetPolicyDocumentStatementArgs(
+                            effect=statement.get("Effect", "Allow"),
+                            actions=statement["Actions"],
+                            resources=statement["Resources"],
+                        )
                     )
+            
+            # Add VPC-related permissions if VPC config is provided
+            if self.vpc_config:
+                policy_statements.extend(
+                    [
+                        aws.iam.GetPolicyDocumentStatementArgs(
+                            effect="Allow",
+                            actions=[
+                                "ec2:CreateNetworkInterface",
+                                "ec2:DescribeNetworkInterfaces",
+                                "ec2:DeleteNetworkInterface",
+                                "ec2:AssignPrivateIpAddresses",
+                                "ec2:UnassignPrivateIpAddresses",
+                            ],
+                            resources=["*"],
+                        ),
+                        aws.iam.GetPolicyDocumentStatementArgs(
+                            effect="Allow",
+                            actions=[
+                                "ec2:DescribeSubnets",
+                                "ec2:DescribeSecurityGroups",
+                                "ec2:DescribeVpcEndpoints",
+                            ],
+                            resources=["*"],
+                        ),
+                    ]
                 )
+            
+            return policy_statements
 
-        # Add VPC-related permissions if VPC config is provided
-        if self.vpc_config:
-            policy_statements.extend(
-                [
-                    aws.iam.GetPolicyDocumentStatementArgs(
-                        effect="Allow",
-                        actions=[
-                            "ec2:CreateNetworkInterface",
-                            "ec2:DescribeNetworkInterfaces",
-                            "ec2:DeleteNetworkInterface",
-                            "ec2:AssignPrivateIpAddresses",
-                            "ec2:UnassignPrivateIpAddresses",
-                        ],
-                        resources=["*"],
-                    ),
-                    aws.iam.GetPolicyDocumentStatementArgs(
-                        effect="Allow",
-                        actions=[
-                            "ec2:DescribeSubnets",
-                            "ec2:DescribeSecurityGroups",
-                            "ec2:DescribeVpcEndpoints",
-                        ],
-                        resources=["*"],
-                    ),
-                ]
+        # Check if policy_statements is a Pulumi Output
+        if isinstance(self.policy_statements, pulumi.Output):
+            # Use apply to handle the Output case
+            policy_statements = self.policy_statements.apply(build_policy_statements)
+        else:
+            # Handle the regular list case
+            policy_statements = build_policy_statements(self.policy_statements or [])
+
+        # Create the policy document - handle both Output and regular cases
+        if isinstance(policy_statements, pulumi.Output):
+            policy_document = policy_statements.apply(
+                lambda statements: aws.iam.get_policy_document(statements=statements)
             )
-
-        # Create the policy document
-        log.info(f"policy_statements: {policy_statements}")
-        policy_document = aws.iam.get_policy_document(statements=policy_statements)
+            policy_json = policy_document.apply(lambda doc: doc.json)
+        else:
+            log.info(f"policy_statements: {policy_statements}")
+            policy_document = aws.iam.get_policy_document(statements=policy_statements)
+            policy_json = policy_document.json
 
         # Attach the policy to the role
         aws.iam.RolePolicy(
             f"{self.name}-role-policy",
             role=role.id,
-            policy=policy_document.json,
+            policy=policy_json,
             opts=pulumi.ResourceOptions(depends_on=[role], parent=self),
         )
 

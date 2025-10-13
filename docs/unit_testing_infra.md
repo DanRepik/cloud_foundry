@@ -8,7 +8,7 @@ Testing infrastructure deployments has always been somewhat problematic.
 
 With the increasing complexity of infrastructure management, ensuring that deployments are flawless has become crucial. Traditional testing methods often fall short when it comes to infrastructure as code. Enter Pulumi Automation, a powerful tool that allows you to programmatically control deployments and integrate them into your testing pipeline. This article will guide you through the process of setting up unit tests for your infrastructure.
 
-Pulumi is an infrastructure as code platform that enables developers to write, deploy, and manage cloud resources using real programming languages. Pulumi Automation API extends Pulumi's capabilities, allowing programmers to orchestrate deployments programmatically, fitting perfectly within automated pipelines.
+Pulumi is an infrastructure as code (IAC) platform that enables developers to write, deploy, and manage cloud resources using real programming languages. Pulumi Automation API extends Pulumi's capabilities, allowing programmers to orchestrate deployments programmatically, fitting perfectly within automated pipelines.
 
 ## Why Unit Test Deployments?
 
@@ -18,7 +18,7 @@ Pulumi is an infrastructure as code platform that enables developers to write, d
 
 ## Organizing Infrastructure Tests with Pulumi and Pytest
 
-The test code is organized into three main components for infrastructure testing:
+To test IAC code using Pulumi automation the test code is organized into three main components:
 
 * **Test Deployment Program:** Defines the infrastructure to test (e.g., a `python_function` as a cloud resource).
 * **Pytest Fixture:** Manages the Pulumi stack lifecycle; deploys the infrastructure resources before the test, yields stack and outputs, then destroys and cleans up after the test. Ensures each test runs in a clean environment without any residual or orphaned resources afterwards.

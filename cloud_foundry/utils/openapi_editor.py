@@ -19,45 +19,24 @@ class OpenAPISpecEditor:
             spec (Union[str, List[str]]): A string representing a YAML content,
             a file path, or a list of strings containing YAML contents or file paths.
         """
-        self.openapi_spec = {}
-        self._yaml = None
-        log.info("Initializing OpenAPISpecEditor")
+        self.openapi_spec = {
+            "openapi": "3.0.3",
+            "info": {
+                "title": "API",
+                "version": "1.0.0",
+                "description": "Generated OpenAPI Spec",
+            },
+            "paths": {},
+            "components": {"schemas": {}, "securitySchemes": {}},
+        }
+        self.merge_spec_item(spec)
 
-        if isinstance(spec, dict):
-            self.openapi_spec = spec
-        elif isinstance(spec, list):
-            for individual_spec in spec:
-                self._merge_spec(individual_spec)
-        elif isinstance(spec, str):
-            self._merge_spec(spec)
-
-    def _merge_spec(self, spec: str):
-        """Merge a single OpenAPI spec into the current one."""
-        # Check if the string is a file path to a YAML file
-        if os.path.isfile(spec) and (spec.endswith(".yaml") or spec.endswith(".yml")):
-            log.info(f"Loading OpenAPI spec from file: {spec}")
-            new_spec_dict = self._load_openapi_spec(spec)
-        else:
-            log.info("Loading OpenAPI spec from string")
-            # Assume the string is YAML content and parse it
-            new_spec_dict = yaml.safe_load(spec)
-
-        # Deep merge the new spec into the current spec
-        self.openapi_spec = self._deep_merge(new_spec_dict, self.openapi_spec)
-
-    def _load_openapi_spec(self, file_name) -> Dict:
-        """Load the OpenAPI spec from a YAML or JSON file."""
-        log.info(f"Loading OpenAPI spec from file: {file_name}")
-        with open(file_name, "r") as file:
-            if file_name.endswith(".yaml") or file_name.endswith(".yml"):
-                return yaml.safe_load(file)
-            elif file_name.endswith(".json"):
-                return json.load(file)
-            else:
-                raise ValueError("Unsupported file format. Use .json, .yaml, or .yml.")
+    @property
+    def yaml(self) -> str:
+        return yaml.dump(self.openapi_spec, sort_keys=False)
 
     def _deep_merge(
-        self, source: Dict[Any, Any], destination: Dict[Any, Any]
+        self, source: Dict[Any, Any], destination: Dict[Any, Any] = None
     ) -> Dict[Any, Any]:
         """
         Deep merge two dictionaries. The source dictionary's values will overwrite
@@ -71,6 +50,9 @@ class OpenAPISpecEditor:
         Returns:
             Dict[Any, Any]: The merged dictionary.
         """
+        if destination is None:
+            destination = self.openapi_spec
+
         for key, value in source.items():
             if isinstance(value, Mapping) and isinstance(destination.get(key), Mapping):
                 destination[key] = self._deep_merge(value, destination.get(key, {}))
@@ -87,6 +69,43 @@ class OpenAPISpecEditor:
             else:
                 destination[key] = value
         return destination
+
+    def merge_spec_item(self, item: Union[str, list[str]]) -> Dict[str, Any]:
+        if not item:
+            return
+        if isinstance(item, dict):
+            self._deep_merge(item)
+        elif isinstance(item, list):
+            for elem in item:
+                self.merge_spec_item(elem)
+        elif os.path.isdir(item):
+            # Import all YAML/YML/JSON files from the folder in alphabetical order
+            files = sorted(
+                [
+                    f
+                    for f in os.listdir(item)
+                    if f.lower().endswith((".yaml", ".yml", ".json"))
+                ]
+            )
+            # Sort the files before processing
+            files = sorted(files)
+            for fname in files:
+                self.merge_spec_item(os.path.join(item, fname))
+        elif os.path.isfile(item) and item.lower().endswith((".yaml", ".yml", ".json")):
+            # Import a single YAML/YML/JSON file
+            with open(item, "r", encoding="utf-8") as f:
+                self.merge_spec_item(f.read())
+        else:
+            # If item is a string, try to parse as YAML or JSON
+            try:
+                # Try YAML first (YAML is a superset of JSON)
+                data = yaml.safe_load(item)
+                if isinstance(data, dict):
+                    self._deep_merge(data)
+                else:
+                    self._deep_merge(json.load(item))
+            except Exception as e:
+                raise ValueError(f"Failed to parse string as YAML/JSON: {e}")
 
     def get_or_create_spec_part(self, keys: List[str], create: bool = False) -> Any:
         """
@@ -105,12 +124,15 @@ class OpenAPISpecEditor:
         for key in keys:
             if create and key not in part:
                 part[key] = {}
-            part = part.get(key)
-            if part is None:
+            if key in part:
+                part = part[key]
+            else:
                 raise KeyError(f"Part '{'.'.join(keys)}' does not exist in the spec.")
         return part
 
-    def get_spec_part(self, keys: List[str], create: bool = False) -> Optional[Any]:
+    def get_spec_part(
+        self, keys: List[str], create: bool = False
+    ) -> Optional[Union[Dict, List, Any]]:
         try:
             return self.get_or_create_spec_part(keys, False)
         except KeyError:
@@ -141,131 +163,127 @@ class OpenAPISpecEditor:
         path: str,
         method: str,
         operation: dict,
+        schema_name: str,
         schema_object: Optional[dict] = None,
     ):
         """
         Add an operation to the OpenAPI spec with optional security handling.
 
-        Args:
-            path (str): The API path.
-            method (str): The HTTP method.
-            operation (dict): The operation definition.
-            schema_object (Optional[dict]): The schema object to check for
-            `x-af-security`.
-        """
-
-        # Check for `x-af-security` in the schema
-        if schema_object and "x-af-security" in schema_object:
-            operation["security"] = [
-                [{key: []} for key in schema_object["x-af-security"].keys()]
-            ]
-        else:
-            # Use global security if `x-af-security` is not defined
-            global_security = self.get_spec_part(["security"])
-            if global_security:
-                operation["security"] = [global_security]
-
-        # Retrieve the operation
-        path = self.get_or_create_spec_part(["paths", path], True)
-        path[method] = operation
-
-        return self
-
-    def add_operation_attribute(
-        self, path: str, method: str, attribute: str, value
-    ) -> "OpenAPISpecEditor":
-        """
-        Add an attribute to a specific operation and return self for chaining.
+        If the schema_object contains x-af-security (role -> permissions mapping),
+        roles are converted into OAuth2-style scopes under a single security scheme.
+        The operation.security becomes: [{scheme_name: [role1, role2, ...]}]
 
         Args:
-            path (str): The API path (e.g., "/token").
-            method (str): The HTTP method (e.g., "post").
-            attribute (str): The name of the attribute to add.
-            value: The value of the attribute to add.
-
-        Returns:
-            OpenAPISpecEditor: Returns the instance for chaining.
+            path (str): API path (e.g. "/items")
+            method (str): HTTP method (e.g. "get")
+            operation (dict): Operation object
+            schema_object (Optional[dict]): Schema carrying x-af-security
+            scheme_name (str): Name of the security scheme to apply
         """
-        # Retrieve the operation
-        operation = self.get_operation(path, method)
+        method = method.lower()
 
-        # Add or update the attribute in the operation
-        operation[attribute] = value
+        # Only set security if caller did not already provide one.
+        if "security" not in operation:
+            roles_security = None
 
-        # Return self to allow method chaining
+            if schema_object and "x-af-security" in schema_object:
+                role_map = schema_object["x-af-security"] or {}
+                roles = list(role_map.keys())
+
+                # Ensure securitySchemes entry exists / is oauth2 with scopes.
+                self._ensure_oauth2_scheme_with_scopes(schema_name, roles, role_map)
+
+                # Convert roles -> scopes for this operation
+                roles_security = [{schema_name: roles}] if roles else None
+
+                # Preserve original role permission matrix as an extension
+                operation["x-af-security"] = role_map
+
+            if roles_security:
+                operation["security"] = roles_security
+            else:
+                # Fallback to global security (already a list of Security Requirement Objects)
+                global_security = self.get_spec_part(["security"])
+                if isinstance(global_security, list):
+                    # Shallow copy to avoid accidental mutation
+                    operation["security"] = list(global_security)
+
+        # Insert / update operation in the paths map
+        path_dict = self.get_or_create_spec_part(["paths", path], True)
+        path_dict[method] = operation
         return self
 
-    def remove_attributes_by_pattern(self, pattern: str) -> None:
+    def _ensure_oauth2_scheme_with_scopes(
+        self,
+        scheme_name: str,
+        roles: List[str],
+        role_map: Dict[str, Any],
+        token_url: str = "https://example.com/oauth2/token",
+    ) -> None:
         """
-        Remove all attributes in the OpenAPI specification that match the
+        Ensure an oauth2 security scheme with clientCredentials flow exists and
+        contains the provided roles as scopes. If the scheme exists and already
+        defines scopes, new ones are merged (idempotent).
+        """
+        security_schemes = self.get_or_create_spec_part(
+            ["components", "securitySchemes"], create=True
+        )
+
+        scheme = security_schemes.get(scheme_name)
+        if not scheme or scheme.get("type") != "oauth2":
+            # (Re)define as oauth2 client credentials flow
+            security_schemes[scheme_name] = {
+                "type": "oauth2",
+                "flows": {
+                    "clientCredentials": {
+                        "tokenUrl": token_url,
+                        "scopes": {},
+                    }
+                },
+                "description": "Auto-generated OAuth2 scheme (roles mapped to scopes).",
+            }
+            scheme = security_schemes[scheme_name]
+
+        flows = scheme.setdefault("flows", {}).setdefault(
+            "clientCredentials",
+            {"tokenUrl": token_url, "scopes": {}},
+        )
+        scopes = flows.setdefault("scopes", {})
+
+        # Merge role scopes with basic description (use permission summary if present)
+        for role in roles:
+            if role not in scopes:
+                perms = role_map.get(role, {})
+                # Build a concise description of permissions if dict
+                if isinstance(perms, dict):
+                    perms_desc = (
+                        ", ".join(f"{k}:{v}" for k, v in perms.items()) or "role scope"
+                    )
+                else:
+                    perms_desc = "role scope"
+                scopes[role] = f"Access for role '{role}'"
+
+    def remove_attributes_with_pattern(
+        self, pattern: str, obj: Optional[Union[Dict, List]] = None
+    ) -> None:
+        """
+        Recursively remove all attributes from the OpenAPI spec that match the
         provided regex pattern.
 
         Args:
-            pattern (str): A regex pattern to match keys in the OpenAPI spec.
-
-        Returns:
-            None
+            pattern (str): The regex pattern to match attribute names.
+            obj (Optional[Union[Dict, List]]): The object to process. If None,
+            starts with the root OpenAPI spec.
         """
-        compiled_pattern = re.compile(pattern)
+        if obj is None:
+            obj = self.openapi_spec
 
-        def remove_matching_keys(data: Union[Dict, List]) -> Union[Dict, List]:
-            """Recursively remove keys matching the regex pattern."""
-            if isinstance(data, dict):
-                return {
-                    key: remove_matching_keys(value)
-                    for key, value in data.items()
-                    if not compiled_pattern.match(key)
-                }
-            elif isinstance(data, list):
-                return [remove_matching_keys(item) for item in data]
-            return data
-
-        self.openapi_spec = remove_matching_keys(self.openapi_spec)
-        log.info(f"Attributes matching '{pattern}' have been removed from the spec.")
-
-    def merge_with(self, new_spec: Union[Dict, str]) -> "OpenAPISpecEditor":
-        """
-        Merge another OpenAPI specification with the current one, with the new
-        spec winning conflicts.
-
-        Args:
-            new_spec (Union[Dict, str]): The new OpenAPI specification to merge in.
-            Can be a dictionary or a string representing YAML content or a file path.
-
-        Returns:
-            OpenAPISpecEditor: Returns the instance for chaining.
-        """
-        if isinstance(new_spec, dict):
-            new_spec_dict = new_spec
-        elif isinstance(new_spec, str):
-            # Check if the string is a file path to a YAML file
-            if os.path.isfile(new_spec) and (
-                new_spec.endswith(".yaml") or new_spec.endswith(".yml")
-            ):
-                with open(new_spec, "r") as file:
-                    new_spec_dict = yaml.safe_load(file)
-            else:
-                # Assume the string is YAML content and parse it
-                new_spec_dict = yaml.safe_load(new_spec)
-        else:
-            raise ValueError(
-                "The new_spec must be a dictionary or a valid YAML string or file path."
-            )
-
-        # Deep merge the new spec into the current spec, with new_spec taking precedence
-        self.openapi_spec = self._deep_merge(new_spec_dict, self.openapi_spec)
-
-        return self
-
-    def to_yaml(self) -> str:
-        """Return the OpenAPI specification as a YAML-formatted string."""
-        if self.openapi_spec:
-            self._yaml = yaml.dump(self.openapi_spec)
-        else:
-            log.warning("OpenAPI spec is empty, returning empty YAML.")
-            self._yaml = ""
-        return self._yaml
-
-    @property
-    def yaml(self) -> str:
-        return self.to_yaml()
+        if isinstance(obj, dict):
+            keys_to_remove = [key for key in obj if re.match(pattern, key)]
+            for key in keys_to_remove:
+                del obj[key]
+            for value in obj.values():
+                self.remove_attributes_with_pattern(pattern, value)
+        elif isinstance(obj, list):
+            for item in obj:
+                self.remove_attributes_with_pattern(pattern, item)

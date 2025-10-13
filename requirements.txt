@@ -3,12 +3,14 @@ pulumi
 pulumi-aws
 
 # testing packages
+docker
 pulumi-automation
 pytest
 pytest-cov
 requests
 boto3
 dotenv
+jwt
 -e .
 
 # packaging packeges
@@ -17,3 +19,6 @@ flake8
 black
 build
 twine
+
+fixture_foundry
+psycopg2-binary

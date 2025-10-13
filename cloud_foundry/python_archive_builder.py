@@ -3,10 +3,14 @@ import shutil
 import subprocess
 import sys
 import zipfile
+import urllib
+import importlib.resources as pkg_resources
 
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.hash_comparator import HashComparator
 from cloud_foundry.archive_builder import ArchiveBuilder
+import boto3
+from urllib.parse import urlparse
 
 log = logger(__name__)
 
@@ -47,6 +51,16 @@ class PythonArchiveBuilder(ArchiveBuilder):
         self._requirements = requirements
         self._working_dir = working_dir
 
+        # Base directory where Lambda-related files will be stored
+        self._base_dir = os.path.join(self._working_dir, f"{self.name}-lambda")
+        # Staging directory for the Lambda source code
+        self._staging = os.path.join(self._base_dir, "staging")
+        # Directory for storing installed Python dependencies
+        self._libs = os.path.join(self._base_dir, "libs")
+        # Final location of the ZIP archive
+        self._location = os.path.join(self._base_dir, f"{self.name}.zip")
+
+
         # Prepare staging areas and install sources
         self.prepare()
 
@@ -81,23 +95,14 @@ class PythonArchiveBuilder(ArchiveBuilder):
         and dependencies will be copied before packaging. Clean any previous
         contents in the directories.
         """
-        # Base directory where Lambda-related files will be stored
-        self._base_dir = os.path.join(self._working_dir, f"{self.name}-lambda")
-        # Staging directory for the Lambda source code
-        self._staging = os.path.join(self._base_dir, "staging")
-        # Directory for storing installed Python dependencies
-        self._libs = os.path.join(self._base_dir, "libs")
-        # Final location of the ZIP archive
-        self._location = os.path.join(self._base_dir, f"{self.name}.zip")
-
         # Clean or create necessary directories
         self.create_clean_folder(self._staging)
         self.create_clean_folder(self._libs)
 
         # Copy the source code into the staging area
-        self.install_sources()
+        self.install_sources(self._staging)
         # Write the requirements file for package installation
-        self.write_requirements()
+        self.write_requirements(self._staging)
 
     def build_archive(self):
         """
@@ -125,7 +130,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
             log.error(f"Error building archive: {e}")
             raise
 
-    def install_sources(self):
+    def install_sources(self, staging: str):
         """
         Copy the specified source files into the staging directory. Sources
         can be directories, files, or inline content.
@@ -137,24 +142,11 @@ class PythonArchiveBuilder(ArchiveBuilder):
 
         # Copy each source to its corresponding destination
         for destination, source in self._sources.items():
-            destination_path = os.path.join(self._staging, destination)
-            try:
-                if os.path.isdir(source):
-                    shutil.copytree(source, destination_path)
-                    log.info(f"Folder copied from {source} to {destination_path}")
-                elif os.path.isfile(source):
-                    os.makedirs(os.path.dirname(destination_path), exist_ok=True)
-                    shutil.copy2(source, destination_path)
-                    log.info(f"File copied from {source} to {destination_path}")
-                else:  # Inline content
-                    with open(destination_path, "w") as f:
-                        f.write(source + "\n")
-                    log.info(f"In line source copied to {destination_path}")
-            except Exception as e:
-                log.error(f"Error copying {source} to {destination_path}: {e}")
-                raise
+            dest_path = os.path.join(staging, destination)
+            # Ensure the staging folder exists
+            self._stage_resource(source, dest_path)
 
-    def write_requirements(self):
+    def write_requirements(self, staging: str):
         """
         Write the Python package requirements into a 'requirements.txt' file
         in the staging area.
@@ -163,7 +155,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
         if not self._requirements:
             return
 
-        requirements_path = os.path.join(self._staging, "requirements.txt")
+        requirements_path = os.path.join(staging, "requirements.txt")
         try:
             with open(requirements_path, "w") as f:
                 for requirement in self._requirements:
@@ -256,4 +248,191 @@ class PythonArchiveBuilder(ArchiveBuilder):
             log.info(f"All files and folders removed from {folder_path}")
         except Exception as e:
             log.error(f"Error cleaning folder {folder_path}: {e}")
+            raise
+
+    def _get_file_resource(self, source_path: str, destination_path: str, default: str = None):
+        """
+        Copy a file or folder from source_path to destination_path.
+        If the source_path does not exist and default is provided, write the default value to the destination.
+
+        Args:
+            source_path (str): The path to the source file or folder.
+            destination_path (str): The path to copy the file or folder to.
+            default (str, optional): Default content to write if source_path does not exist.
+        """
+        # If source_path doesn't start with '/', treat it as relative to the current working directory
+        if not os.path.isabs(source_path):
+            source_path = os.path.join(os.getcwd(), source_path)
+        if os.path.exists(source_path):
+            if os.path.isdir(source_path):
+                # Copy directory recursively
+                if os.path.exists(destination_path):
+                    shutil.rmtree(destination_path)
+                shutil.copytree(source_path, destination_path)
+                log.info(f"Directory copied from {source_path} to {destination_path}")
+            else:
+                # Copy single file
+                os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+                shutil.copy2(source_path, destination_path)
+                log.info(f"File copied from {source_path} to {destination_path}")
+        elif default is not None:
+            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+            with open(destination_path, "w") as f:
+                f.write(default)
+            log.info(f"Default value written to {destination_path} because {source_path} does not exist")
+        else:
+            log.error(f"Source path {source_path} does not exist and no default value provided")
+            raise FileNotFoundError(f"Source path {source_path} does not exist and no default value provided")
+        """
+        Copy a file or folder from source_path to destination_path.
+
+        Args:
+            source_path (str): The path to the source file or folder.
+            destination_path (str): The path to copy the file or folder to.
+        """
+        # If source_path doesn't start with '/', treat it as relative to the current working directory
+        if not os.path.isabs(source_path):
+            source_path = os.path.join(os.getcwd(), source_path)
+        if os.path.isdir(source_path):
+            # Copy directory recursively
+            if os.path.exists(destination_path):
+                shutil.rmtree(destination_path)
+            shutil.copytree(source_path, destination_path)
+            log.info(f"Directory copied from {source_path} to {destination_path}")
+        else:
+            # Copy single file
+            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+            shutil.copy2(source_path, destination_path)
+            log.info(f"File copied from {source_path} to {destination_path}")
+
+    def _stage_resource(self, source_path: str, destination_path: str):
+        """
+        Parse a resource URL to extract the protocol, package name, resource path, and resource.
+
+        Args:
+            resource_url (str): The resource URL in the format 'pkg://package.module/resource_path'.
+
+        Returns:
+            dict: A dictionary containing protocol, pkg_name, resource_path, and resource.
+        """
+
+        parsed = urlparse(source_path)
+
+        try:
+            if source_path.startswith("s3://"):
+                self._get_s3_resource(
+                    parsed.netloc, parsed.path.lstrip("/"), destination_path
+                )  
+            elif source_path.startswith("pkg://"):
+                self._get_package_resource(
+                    parsed.netloc or parsed.path.split("/")[0], "/".join(parsed.path.split("/")[1:]), destination_path
+                )
+            elif source_path.startswith("file://"):
+                parsed = urllib.parse.urlparse(source_path)
+                # Handle relative file URLs (netloc used instead of path)
+                if parsed.path:
+                    file_path = urllib.parse.unquote(parsed.path)
+                elif parsed.netloc:
+                    file_path = urllib.parse.unquote(parsed.netloc)
+                else:
+                    file_path = ""
+                self._get_file_resource(file_path, destination_path)
+            elif source_path.startswith(("http://", "https://")):
+                self._get_network_resource(
+                    source_path, destination_path
+                )
+            else:  # Inline content
+                os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+                with open(destination_path, "w") as f:
+                    f.write(source_path + "\n")
+                log.info(f"In line source copied to {destination_path}")
+        except Exception as e:
+            log.error(f"Error copying {source_path} to {destination_path}: {e}")
+            raise    
+
+    def _get_network_resource(self, url: str, destination_path: str):
+        """
+        Download a resource from a network URL and save it to the destination path.
+
+        Args:
+            url (str): The URL of the resource to download.
+            destination_path (str): The path where the downloaded resource will be saved.
+        """
+        log.info(f"Downloading resource from {url} to {destination_path}")
+        try:
+            import requests
+            response = requests.get(url)
+            response.raise_for_status()
+            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+            with open(destination_path, "wb") as f:
+                f.write(response.content)
+            log.info(f"Resource downloaded successfully to {destination_path}")
+        except Exception as e:
+            log.error(f"Error downloading resource from {url}: {e}")
+            raise
+
+    def _get_package_resource(self, package: str, resource_path: str, destination_path: str):
+        """
+        Get a file resource from a package and copy it to the destination path.
+
+        Args:
+            pkg_name (str): The name of the package.
+            resource_path (str): The path to the resource within the package.
+            destination_path (str): The path where the resource will be copied.
+        """
+        try:
+            if resource_path.endswith("/"):
+                # Import all files from the package folder (resource_path)
+                package_files = pkg_resources.files(package).joinpath(resource_path)
+                if not package_files.is_dir():
+                    raise FileNotFoundError(f"Package folder {resource_path} not found in {package}")
+                for file in package_files.rglob("*"):
+                    if file.is_file():
+                        rel_path = os.path.relpath(str(file), str(package_files))
+                        dest_file = os.path.join(destination_path, rel_path)
+                        os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+                        with file.open("rb") as src, open(dest_file, "wb") as dst:
+                            dst.write(src.read())
+                log.info(f"Package folder {resource_path} from {package} copied to {destination_path}")
+            else:
+                os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+                with pkg_resources.files(package).joinpath(resource_path).open("rb") as src, open(destination_path, "wb") as dst:
+                    dst.write(src.read())
+                log.info(f"Package resource {resource_path} from {package} copied to {destination_path}")
+        except Exception as e:
+            log.error(f"Error importing package resource {resource_path}: {e}")
+            raise
+
+    def _get_s3_resource(self, bucket: str, key: str, destination_path: str):
+        """
+        Download a resource from an S3 bucket and save it to the destination path.
+
+        Args:
+            bucket (str): The name of the S3 bucket.
+            key (str): The key of the resource in the S3 bucket.
+            destination_path (str): The path where the downloaded resource will be saved.
+        """
+        log.info(f"Downloading S3 resource from bucket {bucket}, key {key} to {destination_path}")
+        try:
+            s3 = boto3.client("s3")
+            # Check if the key is a folder (ends with '/')
+            if key.endswith("/"):
+                # List all objects under the prefix
+                paginator = s3.get_paginator("list_objects_v2")
+                for page in paginator.paginate(Bucket=bucket, Prefix=key):
+                    for obj in page.get("Contents", []):
+                        obj_key = obj["Key"]
+                        if obj_key.endswith("/"):
+                            continue  # Skip folder placeholders
+                        rel_path = os.path.relpath(obj_key, key)
+                        dest_file = os.path.join(destination_path, rel_path)
+                        os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+                        s3.download_file(bucket, obj_key, dest_file)
+                log.info(f"S3 folder downloaded successfully to {destination_path}")
+                return
+            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+            s3.download_file(bucket, key, destination_path)
+            log.info(f"S3 resource downloaded successfully to {destination_path}")
+        except Exception as e:
+            log.error(f"Error downloading S3 resource from {bucket}/{key}: {e}")
             raise
