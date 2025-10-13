@@ -25,6 +25,17 @@ classifiers = [
 ]
 urls = { "Documentation" = "https://github.com/DanRepik/cloud-foundry", "Source" = "https://github.com/DanRepik/cloud-foundry" }
 
+# Optional extras
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "flit>=3.9",
+]
+
 [tool.pytest.ini_options]
 pythonpath = [".."]
 testpaths = ["infra"]
@@ -32,3 +43,31 @@ markers = [
     "unit: marks tests as unit tests that do not require a database",
     "integration: marks tests that operate on a real database",
 ]
+
+# Hatch support for local dev flows (keeps flit for building)
+[tool.hatch.envs.default]
+dependencies = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "flit>=3.9",
+]
+
+[tool.hatch.envs.default.scripts]
+test = "pytest -q"
+test_unit = "pytest -q -m unit"
+test_integration = "pytest -q -m integration"
+cov = "pytest -q --cov=cloud_foundry --cov-report=term-missing"
+fmt = [
+    "black .",
+    "isort .",
+]
+lint = [
+    "black --check .",
+    "isort --check-only .",
+    "mypy cloud_foundry",
+]
+build = "flit build"
+publish = "flit publish"
