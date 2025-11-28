@@ -19,18 +19,25 @@ class DocumentRepository(pulumi.ComponentResource):
 
         # Create an S3 bucket
         self.bucket = s3.Bucket(
-            f"{name}-document-respository",
+            f"{name}-document-respo",
             bucket=self.bucket_name,
+            lifecycle_rules=[
+                s3.BucketLifecycleRuleArgs(
+                    enabled=True,
+                    transitions=[
+                        s3.BucketLifecycleRuleTransitionArgs(
+                            days=30,
+                            storage_class="INTELLIGENT_TIERING",
+                        ),
+                    ],
+                )
+            ],
             opts=pulumi.ResourceOptions(parent=self),
         )
-
         # Add lambda triggers if provided
         if notifications:
             for notification in notifications:
                 self.add_notification(notification)
-
-        # Create an S3 bucket
-        self.bucket = s3.Bucket(name)
 
         # Create an IAM role for the Lambda function
         assume_role_policy = {

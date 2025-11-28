@@ -251,7 +251,7 @@ class RestAPI(pulumi.ComponentResource):
                 )
             elif arn_slice["type"] == "pool-validator":
                 pool_arns = invoke_arns[
-                    arn_slice["offset"] : arn_slice["offset"] + arn_slice["length"]
+                    arn_slice["offset"] : (arn_slice["offset"] + arn_slice["length"])
                 ]
                 self.editor.add_user_pool_validator(
                     name=arn_slice["name"],
@@ -399,9 +399,12 @@ class RestAPI(pulumi.ComponentResource):
         permission_names = []
         for name in function_names:
             log.info("Creating permission for function: %s", name)
-            if name not in permission_names:
+            # Create unique permission name by combining REST API name
+            # with function name
+            permission_name = f"{self.name}-{name}-permission"
+            if permission_name not in permission_names:
                 aws.lambda_.Permission(
-                    f"{name}",
+                    permission_name,
                     action="lambda:InvokeFunction",
                     function=name,
                     principal="apigateway.amazonaws.com",
@@ -410,7 +413,7 @@ class RestAPI(pulumi.ComponentResource):
                     ),
                     opts=pulumi.ResourceOptions(parent=self),
                 )
-                permission_names.append(name)
+                permission_names.append(permission_name)
 
     def _create_cognito_permissions(self, invoke_arns: list[str]):
         """
@@ -419,7 +422,9 @@ class RestAPI(pulumi.ComponentResource):
         """
         log.info("Creating Cognito permissions for API Gateway")
         user_pool_arns = [
-            invoke_arns[arn_slice["offset"] : arn_slice["offset"] + arn_slice["length"]]
+            invoke_arns[
+                arn_slice["offset"] : (arn_slice["offset"] + arn_slice["length"])
+            ]
             for arn_slice in self.arn_alloc
             if arn_slice["type"] == "pool-validator"
         ]
@@ -456,10 +461,8 @@ class RestAPI(pulumi.ComponentResource):
                     },
                 ],
             }
-            log.info("Creating Cognito permissions policy: %s", cognito_policy_document)
-
             cognito_policy_document = json.dumps(cognito_policy)
-            log.info(f"Creating Cognito permissions policy: {cognito_policy_document}")
+            log.info("Creating Cognito permissions policy: %s", cognito_policy_document)
 
             cognito_policy_resource = aws.iam.Policy(
                 f"{self.name}-cognito-policy",
