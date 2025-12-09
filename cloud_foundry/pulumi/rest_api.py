@@ -320,6 +320,9 @@ class RestAPI(pulumi.ComponentResource):
         deployment = aws.apigateway.Deployment(
             f"{self.name}-deployment",
             rest_api=rest_api.id,
+            triggers={
+                "redeployment": pulumi.Output.json_dumps(self.api_spec),
+            },
             opts=pulumi.ResourceOptions(parent=self, depends_on=[rest_api]),
         )
 
@@ -445,16 +448,16 @@ class RestAPI(pulumi.ComponentResource):
                 "Statement": [
                     {
                         "Effect": "Allow",
-                        "Action": ["apigateway:POST"],
-                        "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers",
+                        "Actions": ["apigateway:POST"],
+                        "Resources": "arn:aws:apigateway:*::/restapis/*/authorizers",
                         "Condition": {
                             "ArnLike": {"apigateway:CognitoUserPoolProviderArn": arns}
                         },
                     },
                     {
                         "Effect": "Allow",
-                        "Action": ["apigateway:PATCH"],
-                        "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers/*",
+                        "Actions": ["apigateway:PATCH"],
+                        "Resources": "arn:aws:apigateway:*::/restapis/*/authorizers/*",
                         "Condition": {
                             "ArnLike": {"apigateway:CognitoUserPoolProviderArn": arns}
                         },
@@ -511,8 +514,8 @@ class RestAPI(pulumi.ComponentResource):
                     "Statement": [
                         {
                             "Effect": "Allow",
-                            "Action": ["s3:GetObject", "s3:ListBucket"],
-                            "Resource": resources,
+                            "Actions": ["s3:GetObject", "s3:ListBucket"],
+                            "Resources": resources,
                         }
                     ],
                 }

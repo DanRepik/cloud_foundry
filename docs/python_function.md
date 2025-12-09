@@ -93,8 +93,8 @@ Here's an example of a policy statement for a function that puts objects in an S
 policy_statements = [
   {
     "Effect": "Allow",
-    "Action": ["s3:PutObject"],
-    "Resource": [
+    "Actions": ["s3:PutObject"],
+    "Resources": [
       "arn:aws:s3:::your-bucket-name/*"
     ],
   }
@@ -161,8 +161,8 @@ lambda_function = python_function(
     policy_statements=[
         {
             "Effect": "Allow",
-            "Action": ["s3:PutObject", "s3:GetObject"],
-            "Resource": ["arn:aws:s3:::example-bucket/*"],
+            "Actions": ["s3:PutObject", "s3:GetObject"],
+            "Resources": ["arn:aws:s3:::example-bucket/*"],
         },
     ],
 )

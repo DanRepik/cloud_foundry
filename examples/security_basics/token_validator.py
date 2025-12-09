@@ -183,6 +183,6 @@ def create_statement(effect: str, resource: list, action: list) -> dict:
     """Create a policy statement."""
     return {
         "Effect": effect,
-        "Resource": resource,
-        "Action": action,
+        "Resources": resource,
+        "Actions": action,
     }

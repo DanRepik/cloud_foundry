@@ -60,7 +60,6 @@ class PythonArchiveBuilder(ArchiveBuilder):
         # Final location of the ZIP archive
         self._location = os.path.join(self._base_dir, f"{self.name}.zip")
 
-
         # Prepare staging areas and install sources
         self.prepare()
 
@@ -177,9 +176,9 @@ class PythonArchiveBuilder(ArchiveBuilder):
 
         log.info(
             f"Installing packages using: {sys.executable} -m pip "
-            + f"install --target {self._libs} --platform manylinux2010_x86_64 "
+            + f"install --target {self._libs} --platform manylinux2014_x86_64 "
             + "--implementation cp --only-binary=:all: --upgrade "
-            + f"--python-version 3.9 -r {requirements_file}"
+            + f"--python-version 3.12 -r {requirements_file}"
         )
         self.clean_folder(self._libs)
 
@@ -195,13 +194,13 @@ class PythonArchiveBuilder(ArchiveBuilder):
                     "--target",
                     self._libs,
                     "--platform",
-                    "manylinux2010_x86_64",
+                    "manylinux2014_x86_64",
                     "--implementation",
                     "cp",
                     "--only-binary=:all:",
                     "--upgrade",
                     "--python-version",
-                    "3.9",
+                    "3.12",
                     "-r",
                     requirements_file,
                 ]
@@ -250,7 +249,9 @@ class PythonArchiveBuilder(ArchiveBuilder):
             log.error(f"Error cleaning folder {folder_path}: {e}")
             raise
 
-    def _get_file_resource(self, source_path: str, destination_path: str, default: str = None):
+    def _get_file_resource(
+        self, source_path: str, destination_path: str, default: str = None
+    ):
         """
         Copy a file or folder from source_path to destination_path.
         If the source_path does not exist and default is provided, write the default value to the destination.
@@ -279,10 +280,16 @@ class PythonArchiveBuilder(ArchiveBuilder):
             os.makedirs(os.path.dirname(destination_path), exist_ok=True)
             with open(destination_path, "w") as f:
                 f.write(default)
-            log.info(f"Default value written to {destination_path} because {source_path} does not exist")
+            log.info(
+                f"Default value written to {destination_path} because {source_path} does not exist"
+            )
         else:
-            log.error(f"Source path {source_path} does not exist and no default value provided")
-            raise FileNotFoundError(f"Source path {source_path} does not exist and no default value provided")
+            log.error(
+                f"Source path {source_path} does not exist and no default value provided"
+            )
+            raise FileNotFoundError(
+                f"Source path {source_path} does not exist and no default value provided"
+            )
         """
         Copy a file or folder from source_path to destination_path.
 
@@ -322,10 +329,12 @@ class PythonArchiveBuilder(ArchiveBuilder):
             if source_path.startswith("s3://"):
                 self._get_s3_resource(
                     parsed.netloc, parsed.path.lstrip("/"), destination_path
-                )  
+                )
             elif source_path.startswith("pkg://"):
                 self._get_package_resource(
-                    parsed.netloc or parsed.path.split("/")[0], "/".join(parsed.path.split("/")[1:]), destination_path
+                    parsed.netloc or parsed.path.split("/")[0],
+                    "/".join(parsed.path.split("/")[1:]),
+                    destination_path,
                 )
             elif source_path.startswith("file://"):
                 parsed = urllib.parse.urlparse(source_path)
@@ -338,9 +347,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
                     file_path = ""
                 self._get_file_resource(file_path, destination_path)
             elif source_path.startswith(("http://", "https://")):
-                self._get_network_resource(
-                    source_path, destination_path
-                )
+                self._get_network_resource(source_path, destination_path)
             else:  # Inline content
                 os.makedirs(os.path.dirname(destination_path), exist_ok=True)
                 with open(destination_path, "w") as f:
@@ -348,7 +355,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
                 log.info(f"In line source copied to {destination_path}")
         except Exception as e:
             log.error(f"Error copying {source_path} to {destination_path}: {e}")
-            raise    
+            raise
 
     def _get_network_resource(self, url: str, destination_path: str):
         """
@@ -361,6 +368,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
         log.info(f"Downloading resource from {url} to {destination_path}")
         try:
             import requests
+
             response = requests.get(url)
             response.raise_for_status()
             os.makedirs(os.path.dirname(destination_path), exist_ok=True)
@@ -371,7 +379,9 @@ class PythonArchiveBuilder(ArchiveBuilder):
             log.error(f"Error downloading resource from {url}: {e}")
             raise
 
-    def _get_package_resource(self, package: str, resource_path: str, destination_path: str):
+    def _get_package_resource(
+        self, package: str, resource_path: str, destination_path: str
+    ):
         """
         Get a file resource from a package and copy it to the destination path.
 
@@ -385,7 +395,9 @@ class PythonArchiveBuilder(ArchiveBuilder):
                 # Import all files from the package folder (resource_path)
                 package_files = pkg_resources.files(package).joinpath(resource_path)
                 if not package_files.is_dir():
-                    raise FileNotFoundError(f"Package folder {resource_path} not found in {package}")
+                    raise FileNotFoundError(
+                        f"Package folder {resource_path} not found in {package}"
+                    )
                 for file in package_files.rglob("*"):
                     if file.is_file():
                         rel_path = os.path.relpath(str(file), str(package_files))
@@ -393,12 +405,21 @@ class PythonArchiveBuilder(ArchiveBuilder):
                         os.makedirs(os.path.dirname(dest_file), exist_ok=True)
                         with file.open("rb") as src, open(dest_file, "wb") as dst:
                             dst.write(src.read())
-                log.info(f"Package folder {resource_path} from {package} copied to {destination_path}")
+                log.info(
+                    f"Package folder {resource_path} from {package} copied to {destination_path}"
+                )
             else:
                 os.makedirs(os.path.dirname(destination_path), exist_ok=True)
-                with pkg_resources.files(package).joinpath(resource_path).open("rb") as src, open(destination_path, "wb") as dst:
+                with (
+                    pkg_resources.files(package)
+                    .joinpath(resource_path)
+                    .open("rb") as src,
+                    open(destination_path, "wb") as dst,
+                ):
                     dst.write(src.read())
-                log.info(f"Package resource {resource_path} from {package} copied to {destination_path}")
+                log.info(
+                    f"Package resource {resource_path} from {package} copied to {destination_path}"
+                )
         except Exception as e:
             log.error(f"Error importing package resource {resource_path}: {e}")
             raise
@@ -412,7 +433,9 @@ class PythonArchiveBuilder(ArchiveBuilder):
             key (str): The key of the resource in the S3 bucket.
             destination_path (str): The path where the downloaded resource will be saved.
         """
-        log.info(f"Downloading S3 resource from bucket {bucket}, key {key} to {destination_path}")
+        log.info(
+            f"Downloading S3 resource from bucket {bucket}, key {key} to {destination_path}"
+        )
         try:
             s3 = boto3.client("s3")
             # Check if the key is a folder (ends with '/')

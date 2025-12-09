@@ -14,7 +14,7 @@ class ApiGatewayLoggingRole(pulumi.ComponentResource):
                 {
                     "Effect": "Allow",
                     "Principal": {"Service": "apigateway.amazonaws.com"},
-                    "Action": "sts:AssumeRole",
+                    "Actions": "sts:AssumeRole",
                 }
             ],
         }
@@ -32,12 +32,12 @@ class ApiGatewayLoggingRole(pulumi.ComponentResource):
             "Statement": [
                 {
                     "Effect": "Allow",
-                    "Action": [
+                    "Actions": [
                         "logs:CreateLogGroup",
                         "logs:CreateLogStream",
                         "logs:PutLogEvents",
                     ],
-                    "Resource": "*",
+                    "Resources": "*",
                 }
             ],
         }

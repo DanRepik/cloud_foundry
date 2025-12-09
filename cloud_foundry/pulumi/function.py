@@ -102,10 +102,12 @@ class Function(pulumi.ComponentResource):
             timeout=self.timeout,
             handler=self.handler or "app.handler",
             source_code_hash=self.hash,
-            runtime=self.runtime or aws.lambda_.Runtime.PYTHON3D9,
+            runtime=self.runtime or aws.lambda_.Runtime.PYTHON3D13,
             environment=aws.lambda_.FunctionEnvironmentArgs(variables=self.environment),
             vpc_config=vpc_config_args,
-            opts=pulumi.ResourceOptions(depends_on=[execution_role, log_group], parent=self),
+            opts=pulumi.ResourceOptions(
+                depends_on=[execution_role, log_group], parent=self
+            ),
         )
 
         # Register outputs
@@ -160,14 +162,15 @@ class Function(pulumi.ComponentResource):
         # Handle user-defined policy statements - they might be a Pulumi Output
         def build_policy_statements(user_statements):
             policy_statements = base_policy_statements.copy()
-            
+
             # Add user-defined policy statements
             for statement in user_statements:
                 if isinstance(statement, str):
                     # Parse JSON string to dict
                     import json
+
                     statement = json.loads(statement)
-                
+
                 if isinstance(statement, dict):
                     log.info(f"Adding user-defined policy statement: {statement}")
                     policy_statements.append(
@@ -177,7 +180,7 @@ class Function(pulumi.ComponentResource):
                             resources=statement["Resources"],
                         )
                     )
-            
+
             # Add VPC-related permissions if VPC config is provided
             if self.vpc_config:
                 policy_statements.extend(
@@ -204,7 +207,7 @@ class Function(pulumi.ComponentResource):
                         ),
                     ]
                 )
-            
+
             return policy_statements
 
         # Check if policy_statements is a Pulumi Output
@@ -217,10 +220,11 @@ class Function(pulumi.ComponentResource):
 
         # Create the policy document - handle both Output and regular cases
         if isinstance(policy_statements, pulumi.Output):
-            policy_document = policy_statements.apply(
-                lambda statements: aws.iam.get_policy_document(statements=statements)
+            policy_json = policy_statements.apply(
+                lambda statements: aws.iam.get_policy_document(
+                    statements=statements
+                ).json
             )
-            policy_json = policy_document.apply(lambda doc: doc.json)
         else:
             log.info(f"policy_statements: {policy_statements}")
             policy_document = aws.iam.get_policy_document(statements=policy_statements)
