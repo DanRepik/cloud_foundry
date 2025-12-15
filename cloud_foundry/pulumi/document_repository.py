@@ -66,6 +66,12 @@ class DocumentRepository(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(parent=self),
         )
 
+        self.register_outputs({
+            "bucket_name": self.bucket.bucket,
+            "bucket_arn": self.bucket.arn,
+            "lambda_role_arn": self.lambda_role.arn,
+        })
+
     def add_notification(self, notification: dict):
         lambda_function = notification["function"]
         prefix_filter = notification.get("prefix", "")

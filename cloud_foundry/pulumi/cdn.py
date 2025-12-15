@@ -28,6 +28,7 @@ class CDNArgs:
         create_apex: Optional[bool] = False,
         hosted_zone_id: Optional[str] = None,
         subdomain: Optional[str] = None,
+        site_domain_name: Optional[str] = None,
         error_responses: Optional[list] = None,
         root_uri: Optional[str] = None,
         whitelist_countries: Optional[List[str]] = None,
@@ -37,6 +38,7 @@ class CDNArgs:
         self.create_apex = create_apex
         self.hosted_zone_id = hosted_zone_id
         self.subdomain = subdomain
+        self.site_domain_name = site_domain_name
         self.error_responses = error_responses
         self.root_uri = root_uri
         self.whitelist_countries = whitelist_countries
@@ -61,17 +63,10 @@ class CDN(pulumi.ComponentResource):
             include_apex=args.create_apex,
         )
 
-        log.info("Creating CloudFront distribution")
-
-        log.info(
-            "aliases:"
-            + {
-                (
-                    [self.domain_name, args.site_domain_name]
-                    if args.create_apex
-                    else [self.domain_name]
-                )
-            }
+        aliases_list = (
+            [self.domain_name, args.site_domain_name]
+            if args.create_apex
+            else [self.domain_name]
         )
 
         origins, caches, target_origin_id = self.get_origins(name, args.origins)
@@ -86,11 +81,7 @@ class CDN(pulumi.ComponentResource):
                 include_cookies=False,
                 prefix="logs/",
             ),
-            aliases=(
-                [self.domain_name, args.site_domain_name]
-                if args.create_apex
-                else [self.domain_name]
-            ),
+            aliases=aliases_list,
             default_cache_behavior=aws.cloudfront.DistributionDefaultCacheBehaviorArgs(
                 target_origin_id=target_origin_id,
                 viewer_protocol_policy="redirect-to-https",
@@ -204,7 +195,12 @@ class CDN(pulumi.ComponentResource):
                 self.site_origins.append(cdn_origin)
 
             elif "domain_name" in origin:
-                cdn_origin = ApiOrigin(f"{name}-{origin["name"]}", origin)
+                cdn_origin = ApiOrigin(f"{name}-{origin["name"]}",
+                                       domain_name=origin["domain_name"],
+                                       path_pattern=origin.get("path_pattern"),
+                                       origin_path=origin.get("origin_path"),
+                                       shield_region=origin.get("origin_shield_region")
+                                       )
                 cdn_origins.append(cdn_origin.distribution_origin)
                 caches.append(cdn_origin.cache_behavior)
 

@@ -448,16 +448,16 @@ class RestAPI(pulumi.ComponentResource):
                 "Statement": [
                     {
                         "Effect": "Allow",
-                        "Actions": ["apigateway:POST"],
-                        "Resources": "arn:aws:apigateway:*::/restapis/*/authorizers",
+                        "Action": ["apigateway:POST"],
+                        "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers",
                         "Condition": {
                             "ArnLike": {"apigateway:CognitoUserPoolProviderArn": arns}
                         },
                     },
                     {
                         "Effect": "Allow",
-                        "Actions": ["apigateway:PATCH"],
-                        "Resources": "arn:aws:apigateway:*::/restapis/*/authorizers/*",
+                        "Action": ["apigateway:PATCH"],
+                        "Resource": "arn:aws:apigateway:*::/restapis/*/authorizers/*",
                         "Condition": {
                             "ArnLike": {"apigateway:CognitoUserPoolProviderArn": arns}
                         },
@@ -514,8 +514,8 @@ class RestAPI(pulumi.ComponentResource):
                     "Statement": [
                         {
                             "Effect": "Allow",
-                            "Actions": ["s3:GetObject", "s3:ListBucket"],
-                            "Resources": resources,
+                            "Action": ["s3:GetObject", "s3:ListBucket"],
+                            "Resource": resources,
                         }
                     ],
                 }

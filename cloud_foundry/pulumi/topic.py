@@ -55,23 +55,37 @@ class Topic(ComponentResource):
             for subscription in args.subscriptions:
                 if subscription.get("queue"):
                     self.subscribe(subscription["queue"])
+        
+        # Register outputs to signal component completion
+        self.register_outputs({
+            "arn": self.topic.arn,
+            "name": self.topic.name,
+        })
 
     @property
     def arn(self) -> Output[str]:
         """Get the ARN of the SNS topic."""
         return self.topic.arn
 
-    def subscribe(self, queue: Queue) -> None:
+    def subscribe(self, queue: Queue, opts: ResourceOptions = None) -> None:
         """Subscribe an SQS queue to this SNS topic.
         Args:
             queue (Queue): The SQS queue to subscribe.
+            opts (ResourceOptions, optional): Pulumi resource options.
         """
-        name = f"{self.name}={queue.name}"
+        name = f"{self.name}-{queue.name}"
+        
+        # Merge parent options with provided options
+        resource_opts = ResourceOptions.merge(
+            ResourceOptions(parent=self),
+            opts
+        )
+        
         # Allow SNS to send messages to SQS
-        aws.sqs.QueuePolicy(
+        queue_policy = aws.sqs.QueuePolicy(
             f"{resource_id(name)}-policy",
             queue_url=queue.url,
-            policy=Output.all(queue.arn, self.topic.arn).apply(
+            policy=Output.all(queue_arn=queue.arn, topic_arn=self.topic.arn).apply(
                 lambda args: json.dumps(
                     {
                         "Version": "2012-10-17",
@@ -79,24 +93,24 @@ class Topic(ComponentResource):
                             {
                                 "Effect": "Allow",
                                 "Principal": {"Service": "sns.amazonaws.com"},
-                                "Actions": "sqs:SendMessage",
-                                "Resources": args[0],
-                                "Condition": {"ArnEquals": {"aws:SourceArn": args[1]}},
+                                "Action": "sqs:SendMessage",
+                                "Resource": args["queue_arn"],
+                                "Condition": {"ArnEquals": {"aws:SourceArn": args["topic_arn"]}},
                             }
                         ],
                     }
                 )
             ),
-            opts=ResourceOptions(parent=self),
+            opts=resource_opts,
         )
 
-        # Subscribe queue to topic
+        # Subscribe queue to topic (depends on policy being created first)
         aws.sns.TopicSubscription(
             f"{resource_id(name)}-sub",
             topic=self.topic.arn,
             protocol="sqs",
             endpoint=queue.arn,
-            opts=ResourceOptions(parent=self),
+            opts=ResourceOptions.merge(resource_opts, ResourceOptions(depends_on=[queue_policy])),
         )
 
 

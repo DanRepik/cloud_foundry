@@ -42,6 +42,12 @@ class Function(pulumi.ComponentResource):
         self.function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
         self.log_group_name = f"/aws/lambda/{self.function_name}"
         # Validate that the environment is a dictionary with string keys and values
+        # Filter out None values and convert them to empty strings
+        if isinstance(self.environment, dict):
+            self.environment = {
+                k: v if v is not None else ""
+                for k, v in self.environment.items()
+            }
         if not isinstance(self.environment, dict) or not all(
             isinstance(k, str) and (isinstance(v, str) or isinstance(v, pulumi.Output))
             for k, v in self.environment.items()
@@ -93,6 +99,29 @@ class Function(pulumi.ComponentResource):
         )
 
         # Create the Lambda function
+        # Handle environment variables - if any are Outputs, we need special handling
+        log.info(f"Environment dict type: {type(self.environment)}")
+        log.info(f"Environment keys: {list(self.environment.keys()) if self.environment else 'None'}")
+        
+        # Check if any environment values are Outputs
+        has_outputs = any(isinstance(v, pulumi.Output) for v in (self.environment.values() if self.environment else []))
+        
+        if self.environment and has_outputs:
+            # If we have Outputs, resolve them all first, then create FunctionEnvironmentArgs
+            log.info("Environment contains Output objects - using Output.all() to resolve")
+            env_dict = pulumi.Output.all(**self.environment)
+            environment_args = env_dict.apply(
+                lambda resolved: aws.lambda_.FunctionEnvironmentArgs(variables=resolved)
+            )
+        elif self.environment:
+            # All values are plain strings
+            log.info("Environment contains only string values")
+            environment_args = aws.lambda_.FunctionEnvironmentArgs(variables=self.environment)
+        else:
+            environment_args = None
+        
+        log.info(f"Environment args type: {type(environment_args)}")
+        
         self.lambda_ = aws.lambda_.Function(
             f"{self.name}-function",
             code=pulumi.FileArchive(self.archive_location),
@@ -103,7 +132,7 @@ class Function(pulumi.ComponentResource):
             handler=self.handler or "app.handler",
             source_code_hash=self.hash,
             runtime=self.runtime or aws.lambda_.Runtime.PYTHON3D13,
-            environment=aws.lambda_.FunctionEnvironmentArgs(variables=self.environment),
+            environment=environment_args,
             vpc_config=vpc_config_args,
             opts=pulumi.ResourceOptions(
                 depends_on=[execution_role, log_group], parent=self
@@ -172,12 +201,31 @@ class Function(pulumi.ComponentResource):
                     statement = json.loads(statement)
 
                 if isinstance(statement, dict):
+                    # Support both AWS standard (Action/Resource) and plural (Actions/Resources)
+                    actions = statement.get("Actions") or statement.get("Action") or []
+                    resources = statement.get("Resources") or statement.get("Resource") or []
+                    
+                    # Normalize to list if single string
+                    if isinstance(actions, str):
+                        actions = [actions]
+                    if isinstance(resources, str):
+                        resources = [resources]
+                    
+                    # Filter out None/empty values
+                    actions = [a for a in actions if a]
+                    resources = [r for r in resources if r]
+                    
+                    # Skip statement if no actions or resources
+                    if not actions or not resources:
+                        log.warning(f"Skipping policy statement with empty actions or resources: {statement}")
+                        continue
+                    
                     log.info(f"Adding user-defined policy statement: {statement}")
                     policy_statements.append(
                         aws.iam.GetPolicyDocumentStatementArgs(
                             effect=statement.get("Effect", "Allow"),
-                            actions=statement["Actions"],
-                            resources=statement["Resources"],
+                            actions=actions,
+                            resources=resources,
                         )
                     )
 
@@ -220,13 +268,17 @@ class Function(pulumi.ComponentResource):
 
         # Create the policy document - handle both Output and regular cases
         if isinstance(policy_statements, pulumi.Output):
-            policy_json = policy_statements.apply(
-                lambda statements: aws.iam.get_policy_document(
-                    statements=statements
-                ).json
-            )
+            def create_policy_doc(statements):
+                log.info(f"Creating policy document with {len(statements)} statements")
+                for i, stmt in enumerate(statements):
+                    log.info(f"Statement {i}: effect={stmt.effect}, actions={stmt.actions}, resources={stmt.resources}")
+                return aws.iam.get_policy_document(statements=statements).json
+            
+            policy_json = policy_statements.apply(create_policy_doc)
         else:
-            log.info(f"policy_statements: {policy_statements}")
+            log.info(f"policy_statements count: {len(policy_statements)}")
+            for i, stmt in enumerate(policy_statements):
+                log.info(f"Statement {i}: effect={stmt.effect}, actions={stmt.actions}, resources={stmt.resources}")
             policy_document = aws.iam.get_policy_document(statements=policy_statements)
             policy_json = policy_document.json
 

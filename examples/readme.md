@@ -68,6 +68,35 @@ The `hello_function` example demonstrates how to deploy a simple AWS Lambda func
 - **Usage**:
     Follow the steps outlined above to set up and deploy this example.
 
+### Greet API
+The `greet_api` example demonstrates how to create a REST API with Lambda integrations using the cloud_foundry framework.
+
+- **Key Features**:
+    - OpenAPI specification-based REST API
+    - Lambda function integration
+    - Query parameter handling
+    - JSON responses
+
+- **Usage**:
+    Follow the steps outlined above to set up and deploy this example.
+
+### WebSocket Chat
+The `websocket_chat` example demonstrates how to build a real-time chat application using WebSocket APIs.
+
+- **Key Features**:
+    - WebSocket API with multiple routes ($connect, $disconnect, sendMessage)
+    - Connection management with DynamoDB
+    - Message broadcasting and direct messaging
+    - User identification and metadata
+    - Automatic TTL-based cleanup
+    - CloudWatch logging
+
+- **Documentation**:
+    See `examples/websocket_chat/README.md` for detailed usage instructions.
+
+- **Usage**:
+    Follow the steps outlined above to set up and deploy this example.
+
 For more examples, refer to the repository's `examples` directory.
 
 Enjoy exploring the examples!
