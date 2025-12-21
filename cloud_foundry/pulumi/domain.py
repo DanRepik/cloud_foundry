@@ -49,11 +49,13 @@ class Domain(ComponentResource):
             opts=ResourceOptions(parent=self),
         )
 
-        self.register_outputs({
-            "certificate_arn": self.certificate.arn,
-            "domain_name": self.certificate.domain_name,
-            "validation_arn": self.validation.id,
-        })
+        self.register_outputs(
+            {
+                "certificate_arn": self.certificate.arn,
+                "domain_name": self.certificate.domain_name,
+                "validation_arn": self.validation.id,
+            }
+        )
 
 
 def domain(

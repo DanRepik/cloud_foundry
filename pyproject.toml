@@ -1,12 +1,12 @@
 # src/pyproject.toml
 
 [build-system]
-requires = ["flit-core>=3.2"]
-build-backend = "flit_core.buildapi"
+requires = ["hatchling>=1.0"]
+build-backend = "hatchling.build"
 
 [project]
 name = "cloud-foundry"
-version = "0.1.2"
+dynamic = ["version"]
 authors = [
     { name = "Daniel Repik", email = "danrepik@icloud.com" }
 ]
@@ -54,6 +54,15 @@ dependencies = [
     "mypy>=1.0.0",
     "flit>=3.9",
 ]
+
+[tool.hatch.build.targets.sdist]
+include = ["cloud_foundry"]
+
+[tool.hatch.build.targets.wheel]
+include = ["cloud_foundry"]
+
+[tool.hatch.version]
+path = "cloud_foundry/__init__.py"
 
 [tool.hatch.envs.default.scripts]
 test = "pytest -q"

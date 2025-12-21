@@ -49,9 +49,7 @@ def get_api_gateway_client():
     """
     endpoint = os.environ.get("WEBSOCKET_API_ENDPOINT")
     if not endpoint:
-        raise ValueError(
-            "WEBSOCKET_API_ENDPOINT environment variable not set"
-        )
+        raise ValueError("WEBSOCKET_API_ENDPOINT environment variable not set")
 
     # Extract the endpoint URL from the full WebSocket URL
     # Expected format: wss://xxxxx.execute-api.region.amazonaws.com/stage

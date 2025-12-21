@@ -60,18 +60,14 @@ class ConnectionStore(pulumi.ComponentResource):
                 - non_key_attributes (list, optional): For INCLUDE projection
             opts (pulumi.ResourceOptions): Pulumi resource options
         """
-        super().__init__(
-            "cloud_foundry:websocket:ConnectionStore", name, None, opts
-        )
+        super().__init__("cloud_foundry:websocket:ConnectionStore", name, None, opts)
         self.name = name
         self.ttl_attribute = ttl_attribute
         self.ttl_enabled = ttl_enabled
         self.global_secondary_indexes = global_secondary_indexes or []
 
         # Create the DynamoDB table
-        self.table = self._create_table(
-            billing_mode, read_capacity, write_capacity
-        )
+        self.table = self._create_table(billing_mode, read_capacity, write_capacity)
         self.table_name = self.table.name
         self.table_arn = self.table.arn
 
@@ -83,9 +79,7 @@ class ConnectionStore(pulumi.ComponentResource):
             }
         )
 
-    def _create_table(
-        self, billing_mode: str, read_capacity: int, write_capacity: int
-    ):
+    def _create_table(self, billing_mode: str, read_capacity: int, write_capacity: int):
         """
         Create the DynamoDB table for connection storage.
 
@@ -99,9 +93,7 @@ class ConnectionStore(pulumi.ComponentResource):
         """
         log.info("Creating connection store table: %s", self.name)
 
-        table_name = (
-            f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
-        )
+        table_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
 
         # Define base attributes
         attributes = [
@@ -145,9 +137,7 @@ class ConnectionStore(pulumi.ComponentResource):
                 gsi_config.range_key = gsi["range_key"]
 
             if gsi.get("projection_type") == "INCLUDE":
-                gsi_config.non_key_attributes = gsi.get(
-                    "non_key_attributes", []
-                )
+                gsi_config.non_key_attributes = gsi.get("non_key_attributes", [])
 
             if billing_mode == "PROVISIONED":
                 gsi_config.read_capacity = gsi.get("read_capacity", 5)

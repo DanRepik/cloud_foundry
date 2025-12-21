@@ -117,7 +117,7 @@ ws.onmessage = (event) => {
 ### $connect
 - **Trigger**: New WebSocket connection
 - **Function**: `handlers/connect.py`
-- **Action**: 
+- **Action**:
   - Store connection in DynamoDB
   - Extract user info from query params
   - Set TTL for automatic cleanup

@@ -61,6 +61,4 @@ def handler(event, context):  # noqa: ARG001
 
     except Exception as e:  # noqa: BLE001
         print(f"Error storing connection: {str(e)}")
-        return create_response(
-            500, {"error": "Failed to establish connection"}
-        )
+        return create_response(500, {"error": "Failed to establish connection"})

@@ -166,7 +166,7 @@ The WebSocket components integrate seamlessly with:
 connection_store = ConnectionStore("connections", ...)
 
 # 2. Create Lambda functions
-connect_fn = WebSocketFunction("connect", 
+connect_fn = WebSocketFunction("connect",
     connection_table_arn=connection_store.table_arn, ...)
 
 # 3. Create WebSocket API

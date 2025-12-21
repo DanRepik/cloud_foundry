@@ -78,9 +78,7 @@ class WebSocketFunction(Function):
 
         # Add API Gateway management API permissions for posting to connections
         if api_endpoint:
-            ws_policy_statements.append(
-                self._get_api_gateway_management_policy()
-            )
+            ws_policy_statements.append(self._get_api_gateway_management_policy())
 
         # Initialize the base Function
         super().__init__(
@@ -128,9 +126,7 @@ class WebSocketFunction(Function):
                 "Actions": [
                     "dynamodb:Query",
                 ],
-                "Resources": [
-                    pulumi.Output.concat(connection_table_arn, "/index/*")
-                ],
+                "Resources": [pulumi.Output.concat(connection_table_arn, "/index/*")],
             },
         ]
 

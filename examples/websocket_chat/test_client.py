@@ -171,7 +171,7 @@ def main():
     print("=" * 60)
     print("\nCommands:")
     print("  <text>                 - Send broadcast message")
-    print("  {\"json\": \"data\"}       - Send raw JSON")
+    print('  {"json": "data"}       - Send raw JSON')
     print("  quit                   - Disconnect and exit")
     print("=" * 60)
 

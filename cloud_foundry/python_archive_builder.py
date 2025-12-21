@@ -174,15 +174,13 @@ class PythonArchiveBuilder(ArchiveBuilder):
             log.warning(f"No requirements file found at {requirements_file}")
             return
 
-        log.info(
-            f"Installing packages using: {sys.executable} -m pip "
-            + f"install --target {self._libs} --platform manylinux2014_x86_64 "
-            + "--implementation cp --only-binary=:all: --upgrade "
-            + f"--python-version 3.12 -r {requirements_file}"
-        )
         self.clean_folder(self._libs)
 
-        # Install the required packages using pip
+        # Try multiple strategies for installing packages
+        install_success = False
+
+        # Strategy 1: Try with manylinux2014 platform wheels (Python 3.12 compatible)
+        log.info("Strategy 1: Attempting manylinux2014 platform wheels for Python 3.12")
         try:
             subprocess.check_call(
                 [
@@ -190,24 +188,94 @@ class PythonArchiveBuilder(ArchiveBuilder):
                     "-m",
                     "pip",
                     "install",
-                    "-v",
                     "--target",
                     self._libs,
                     "--platform",
                     "manylinux2014_x86_64",
+                    "--only-binary=:all:",
                     "--implementation",
                     "cp",
-                    "--only-binary=:all:",
-                    "--upgrade",
                     "--python-version",
                     "3.12",
+                    "--upgrade",
                     "-r",
                     requirements_file,
-                ]
+                ],
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
             )
+            install_success = True
+            log.info("✓ Successfully installed with manylinux2014 wheels")
         except subprocess.CalledProcessError as e:
-            log.error(f"Error installing requirements: {e}")
-            raise
+            log.info(
+                f"✗ Strategy 1 failed: {e.stderr.decode() if e.stderr else 'Unknown error'}"
+            )
+            self.clean_folder(self._libs)
+
+        # Strategy 2: Try with manylinux_2_17 (broader compatibility for Python 3.12)
+        if not install_success:
+            log.info("Strategy 2: Attempting manylinux_2_17 platform wheels")
+            try:
+                subprocess.check_call(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pip",
+                        "install",
+                        "--target",
+                        self._libs,
+                        "--platform",
+                        "manylinux_2_17_x86_64",
+                        "--only-binary=:all:",
+                        "--implementation",
+                        "cp",
+                        "--python-version",
+                        "3.12",
+                        "--upgrade",
+                        "-r",
+                        requirements_file,
+                    ],
+                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                )
+                install_success = True
+                log.info("✓ Successfully installed with manylinux_2_17 wheels")
+            except subprocess.CalledProcessError as e:
+                log.info(
+                    f"✗ Strategy 2 failed: {e.stderr.decode() if e.stderr else 'Unknown error'}"
+                )
+                self.clean_folder(self._libs)
+
+        # Strategy 3: Fall back to regular install (builds from source for current platform)
+        if not install_success:
+            log.info(
+                "Strategy 3: Installing for current platform (may require building from source)"
+            )
+            log.warning(
+                "⚠️  Installing packages for your local platform. "
+                "Native extensions (psycopg2, cryptography) may not work in AWS Lambda."
+            )
+            try:
+                subprocess.check_call(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pip",
+                        "install",
+                        "-v",
+                        "--target",
+                        self._libs,
+                        "--upgrade",
+                        "-r",
+                        requirements_file,
+                    ]
+                )
+                log.info(
+                    "✓ Packages installed (local platform - may need Lambda layers for native deps)"
+                )
+            except subprocess.CalledProcessError as e:
+                log.error(f"✗ All installation strategies failed: {e}")
+                raise
 
     def create_clean_folder(self, folder_path):
         """

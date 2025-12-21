@@ -235,10 +235,23 @@ class RestAPI(pulumi.ComponentResource):
 
     def _build_spec(self, invoke_arns: list[str]) -> str:
         log.info("Building API spec with AWSOpenAPISpecEditor")
+
+        # Apply path prefix first if specified
+        if self.path_prefix:
+            log.info("Adding path prefix: %s to all paths", self.path_prefix)
+            self.editor.prefix_paths(self.path_prefix)
+
         for arn_slice in self.arn_alloc:
             if arn_slice["type"] == "integration":
+                # Apply prefix to integration path to match the prefixed spec paths
+                integration_path = arn_slice["path"]
+                if self.path_prefix:
+                    integration_path = (
+                        f"{self.path_prefix.rstrip('/')}/{integration_path.lstrip('/')}"
+                    )
+
                 self.editor.add_integration(
-                    path=arn_slice["path"],
+                    path=integration_path,
                     method=arn_slice["method"],
                     function_name=invoke_arns[arn_slice["offset"]],
                     invoke_arn=invoke_arns[arn_slice["offset"] + 1],
@@ -266,16 +279,18 @@ class RestAPI(pulumi.ComponentResource):
             else:
                 raise ValueError(f"Unknown ARN slice type: {arn_slice['type']}")
 
-        # Process any S3 content integration using the last ARN
-        # (if gateway_role was provided).
-        if self.content:
-            log.info("Adding path prefix: %s to all paths", self.path_prefix)
+        self.api_spec = self.editor.yaml
 
-        if self.path_prefix:
-            log.info("Adding path prefix: %s to all paths", self.path_prefix)
-            self.editor.prefix_paths(self.path_prefix)
-            log.info("Exporting API specification for %s", self.name)
+    def _create_rest_api(self, invoke_arns: list[str]) -> aws.apigateway.RestApi:
+        """
+        Create the RestApi resource in AWS API Gateway.
+        """
+        log.info("Building API spec with AWSOpenAPISpecEditor")
+        self._build_spec(invoke_arns)
+        self._create_lambda_permissions()
+        self._create_cognito_permissions(invoke_arns)
 
+        log.info("Exporting API specification for %s", self.name)
         if self.export_api:
             log.info("Exporting API specification for %s", self.name)
             if self.export_api.startswith("s3://"):
@@ -292,17 +307,6 @@ class RestAPI(pulumi.ComponentResource):
                 with open(self.export_api, "w") as file:
                     file.write(self.editor.yaml)
                 log.info("API specification exported to file: %s", self.export_api)
-
-        self.api_spec = self.editor.yaml
-
-    def _create_rest_api(self, invoke_arns: list[str]) -> aws.apigateway.RestApi:
-        """
-        Create the RestApi resource in AWS API Gateway.
-        """
-        log.info("Building API spec with AWSOpenAPISpecEditor")
-        self._build_spec(invoke_arns)
-        self._create_lambda_permissions()
-        self._create_cognito_permissions(invoke_arns)
 
         log.info("Creating RestApi resource")
         return aws.apigateway.RestApi(

@@ -55,12 +55,14 @@ class Topic(ComponentResource):
             for subscription in args.subscriptions:
                 if subscription.get("queue"):
                     self.subscribe(subscription["queue"])
-        
+
         # Register outputs to signal component completion
-        self.register_outputs({
-            "arn": self.topic.arn,
-            "name": self.topic.name,
-        })
+        self.register_outputs(
+            {
+                "arn": self.topic.arn,
+                "name": self.topic.name,
+            }
+        )
 
     @property
     def arn(self) -> Output[str]:
@@ -74,13 +76,10 @@ class Topic(ComponentResource):
             opts (ResourceOptions, optional): Pulumi resource options.
         """
         name = f"{self.name}-{queue.name}"
-        
+
         # Merge parent options with provided options
-        resource_opts = ResourceOptions.merge(
-            ResourceOptions(parent=self),
-            opts
-        )
-        
+        resource_opts = ResourceOptions.merge(ResourceOptions(parent=self), opts)
+
         # Allow SNS to send messages to SQS
         queue_policy = aws.sqs.QueuePolicy(
             f"{resource_id(name)}-policy",
@@ -95,7 +94,9 @@ class Topic(ComponentResource):
                                 "Principal": {"Service": "sns.amazonaws.com"},
                                 "Action": "sqs:SendMessage",
                                 "Resource": args["queue_arn"],
-                                "Condition": {"ArnEquals": {"aws:SourceArn": args["topic_arn"]}},
+                                "Condition": {
+                                    "ArnEquals": {"aws:SourceArn": args["topic_arn"]}
+                                },
                             }
                         ],
                     }
@@ -110,7 +111,9 @@ class Topic(ComponentResource):
             topic=self.topic.arn,
             protocol="sqs",
             endpoint=queue.arn,
-            opts=ResourceOptions.merge(resource_opts, ResourceOptions(depends_on=[queue_policy])),
+            opts=ResourceOptions.merge(
+                resource_opts, ResourceOptions(depends_on=[queue_policy])
+            ),
         )
 
 

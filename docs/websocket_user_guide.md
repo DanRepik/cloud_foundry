@@ -271,13 +271,13 @@ Called when a client connects. Store the connection and extract user info:
 def handler(event, context):
     connection_id = event["requestContext"]["connectionId"]
     query_params = event.get("queryStringParameters") or {}
-    
+
     store_connection(
         connection_id=connection_id,
         user_id=query_params.get("userId"),
         metadata={"username": query_params.get("username")},
     )
-    
+
     return create_response(200)
 ```
 
@@ -300,16 +300,16 @@ Handle custom routes for your application logic:
 def handler(event, context):
     connection_id = event["requestContext"]["connectionId"]
     body = json.loads(event.get("body", "{}"))
-    
+
     # Your business logic
     message = body.get("message")
-    
+
     # Broadcast to others
     broadcast_message(
         {"sender": connection_id, "message": message},
         filter_fn=lambda c: c["connectionId"] != connection_id
     )
-    
+
     return create_response(200)
 ```
 
@@ -340,7 +340,7 @@ const ws = new WebSocket(
 // Handle connection
 ws.onopen = () => {
   console.log('Connected');
-  
+
   // Send a message
   ws.send(JSON.stringify({
     action: 'sendMessage',  // Route key
@@ -374,14 +374,14 @@ import json
 
 async def connect():
     uri = "wss://abc123.execute-api.us-east-1.amazonaws.com/dev"
-    
+
     async with websockets.connect(uri) as websocket:
         # Send message
         await websocket.send(json.dumps({
             "action": "sendMessage",
             "message": "Hello from Python!"
         }))
-        
+
         # Receive messages
         async for message in websocket:
             data = json.loads(message)

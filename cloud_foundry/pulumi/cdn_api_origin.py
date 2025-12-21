@@ -63,8 +63,10 @@ class ApiOrigin(pulumi.ComponentResource):
         # If domain_name is an Output, we need to handle it properly
         # Pulumi should handle Output automatically, but let's ensure it's properly typed
         if isinstance(domain_name, pulumi.Output):
-            log.info("Domain name is a Pulumi Output - will be resolved at deployment time")
-        
+            log.info(
+                "Domain name is a Pulumi Output - will be resolved at deployment time"
+            )
+
         # Define the CloudFront distribution origin
         self.distribution_origin = aws.cloudfront.DistributionOriginArgs(
             domain_name=domain_name,

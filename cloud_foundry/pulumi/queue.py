@@ -106,13 +106,15 @@ class Queue(ComponentResource):
             ),
             opts=ResourceOptions(parent=self),
         )
-        
+
         # Register outputs to signal component completion
-        self.register_outputs({
-            "arn": self.queue.arn,
-            "url": self.queue.id,
-            "dlq_arn": self.dlq.arn,
-        })
+        self.register_outputs(
+            {
+                "arn": self.queue.arn,
+                "url": self.queue.id,
+                "dlq_arn": self.dlq.arn,
+            }
+        )
 
     @property
     def arn(self) -> Output[str]:
@@ -124,9 +126,9 @@ class Queue(ComponentResource):
 
     def subscribe(self, function: str | Function | aws.lambda_.Function) -> None:
         """Add SQS queue as Lambda event source.
-        
+
         Args:
-            function: Either a function name (str), cloud_foundry Function, 
+            function: Either a function name (str), cloud_foundry Function,
                 or aws.lambda_.Function instance.
         """
         # Extract function name based on type
@@ -136,14 +138,14 @@ class Queue(ComponentResource):
             function_name = function.function_name
         else:
             function_name = function
-        
+
         # Build dependencies list
         depends_on = []
         if isinstance(function, Function):
             depends_on.append(function.lambda_)
         elif isinstance(function, aws.lambda_.Function):
             depends_on.append(function)
-        
+
         aws.lambda_.EventSourceMapping(
             f"{resource_id(self.name)}-source",
             event_source_arn=self.queue.arn,

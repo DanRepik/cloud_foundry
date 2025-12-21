@@ -131,28 +131,22 @@ class WebSocketAPI(pulumi.ComponentResource):
         are present.
         """
         if not self.routes:
-            raise ValueError(
-                "At least one route must be defined for WebSocket API"
-            )
+            raise ValueError("At least one route must be defined for WebSocket API")
 
         seen_routes = set()
         required_routes = {"$connect", "$disconnect", "$default"}
-        
+
         for route in self.routes:
             route_key = route.get("route_key")
             if not route_key:
-                raise ValueError(
-                    "Each route must have a 'route_key' attribute"
-                )
+                raise ValueError("Each route must have a 'route_key' attribute")
 
             if route_key in seen_routes:
                 raise ValueError(f"Duplicate route key found: {route_key}")
             seen_routes.add(route_key)
 
             if "function" not in route:
-                raise ValueError(
-                    f"Route '{route_key}' must have a 'function' defined"
-                )
+                raise ValueError(f"Route '{route_key}' must have a 'function' defined")
 
         # Check if required routes are defined
         missing_routes = required_routes - seen_routes
@@ -177,7 +171,7 @@ class WebSocketAPI(pulumi.ComponentResource):
                         f"{self.name}-{route['route_key']}-function",
                         route["function"],
                     )
-                
+
                 arn_alloc.append(
                     {
                         "type": "route",
@@ -188,9 +182,7 @@ class WebSocketAPI(pulumi.ComponentResource):
                 )
                 all_arns.append(route["function"].function_name)
                 all_arns.append(route["function"].arn)
-                log.info(
-                    f"Adding route ARN for route key: {route['route_key']}"
-                )
+                log.info(f"Adding route ARN for route key: {route['route_key']}")
 
         # Collect authorizer function ARN if using Lambda authorizer
         if self.authorizer and self.authorizer.get("type") == "lambda":
@@ -199,7 +191,7 @@ class WebSocketAPI(pulumi.ComponentResource):
                     f"{self.name}-authorizer-function",
                     self.authorizer["function"],
                 )
-            
+
             arn_alloc.append(
                 {
                     "type": "authorizer",
@@ -235,9 +227,7 @@ class WebSocketAPI(pulumi.ComponentResource):
 
         # Create integrations and routes
         for route in self.routes:
-            self._create_route_integration(
-                api, route, resolved_arns, authorizer_id
-            )
+            self._create_route_integration(api, route, resolved_arns, authorizer_id)
 
         return api
 
@@ -253,12 +243,10 @@ class WebSocketAPI(pulumi.ComponentResource):
                 (a for a in self.arn_alloc if a["type"] == "authorizer"), None
             )
             if not auth_alloc:
-                raise ValueError(
-                    "Authorizer function not found in ARN allocation"
-                )
+                raise ValueError("Authorizer function not found in ARN allocation")
 
             function_arn = resolved_arns[auth_alloc["offset"] + 1]
-            
+
             authorizer = aws.apigatewayv2.Authorizer(
                 f"{self.name}-authorizer",
                 api_id=api.id,
@@ -272,8 +260,7 @@ class WebSocketAPI(pulumi.ComponentResource):
                 ),
                 identity_sources=[
                     self.authorizer.get(
-                        "identity_source",
-                        "route.request.header.Authorization"
+                        "identity_source", "route.request.header.Authorization"
                     )
                 ],
                 name=f"{self.name}-authorizer",
@@ -296,9 +283,7 @@ class WebSocketAPI(pulumi.ComponentResource):
 
         return None
 
-    def _create_route_integration(
-        self, api, route, resolved_arns, authorizer_id
-    ):
+    def _create_route_integration(self, api, route, resolved_arns, authorizer_id):
         """
         Create an integration and route for a Lambda function.
         """
@@ -315,9 +300,7 @@ class WebSocketAPI(pulumi.ComponentResource):
             None,
         )
         if not route_alloc:
-            raise ValueError(
-                f"Route function not found for route key: {route_key}"
-            )
+            raise ValueError(f"Route function not found for route key: {route_key}")
 
         function_name = resolved_arns[route_alloc["offset"]]
         function_arn = resolved_arns[route_alloc["offset"] + 1]
@@ -360,7 +343,7 @@ class WebSocketAPI(pulumi.ComponentResource):
             source_arn=pulumi.Output.concat(
                 api.execution_arn,
                 "/",
-                self.stage.name if hasattr(self, 'stage') else "*"
+                self.stage.name if hasattr(self, "stage") else "*",
             ),
             opts=pulumi.ResourceOptions(parent=self),
         )
@@ -368,10 +351,7 @@ class WebSocketAPI(pulumi.ComponentResource):
         # Add connection table ARN to function environment if provided
         conn_routes = ["$connect", "$disconnect"]
         if self.connection_table_arn and route_key in conn_routes:
-            log.info(
-                f"Connection table will be accessible to "
-                f"{route_key} handler"
-            )
+            log.info(f"Connection table will be accessible to " f"{route_key} handler")
 
     def _create_stage(self, api):
         """
@@ -403,9 +383,7 @@ class WebSocketAPI(pulumi.ComponentResource):
                         "status": "$context.status",
                         "protocol": "$context.protocol",
                         "responseLength": "$context.responseLength",
-                        "integrationErrorMessage": (
-                            "$context.integrationErrorMessage"
-                        ),
+                        "integrationErrorMessage": ("$context.integrationErrorMessage"),
                         "errorMessage": "$context.error.message",
                         "errorType": "$context.error.messageString",
                         "connectionId": "$context.connectionId",
@@ -474,14 +452,8 @@ class WebSocketAPI(pulumi.ComponentResource):
             type="A",
             aliases=[
                 aws.route53.RecordAliasArgs(
-                    name=(
-                        custom_domain.domain_name_configuration
-                        .target_domain_name
-                    ),
-                    zone_id=(
-                        custom_domain.domain_name_configuration
-                        .hosted_zone_id
-                    ),
+                    name=(custom_domain.domain_name_configuration.target_domain_name),
+                    zone_id=(custom_domain.domain_name_configuration.hosted_zone_id),
                     evaluate_target_health=False,
                 )
             ],

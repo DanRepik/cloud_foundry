@@ -21,11 +21,19 @@ class DocumentRepository(pulumi.ComponentResource):
         self.bucket = s3.Bucket(
             f"{name}-document-respo",
             bucket=self.bucket_name,
-            lifecycle_rules=[
-                s3.BucketLifecycleRuleArgs(
-                    enabled=True,
+            opts=pulumi.ResourceOptions(parent=self),
+        )
+
+        # Create lifecycle configuration separately (recommended approach)
+        s3.BucketLifecycleConfigurationV2(
+            f"{name}-lifecycle-config",
+            bucket=self.bucket.id,
+            rules=[
+                s3.BucketLifecycleConfigurationV2RuleArgs(
+                    id="intelligent-tiering",
+                    status="Enabled",
                     transitions=[
-                        s3.BucketLifecycleRuleTransitionArgs(
+                        s3.BucketLifecycleConfigurationV2RuleTransitionArgs(
                             days=30,
                             storage_class="INTELLIGENT_TIERING",
                         ),
@@ -34,6 +42,7 @@ class DocumentRepository(pulumi.ComponentResource):
             ],
             opts=pulumi.ResourceOptions(parent=self),
         )
+
         # Add lambda triggers if provided
         if notifications:
             for notification in notifications:
@@ -66,11 +75,13 @@ class DocumentRepository(pulumi.ComponentResource):
             opts=pulumi.ResourceOptions(parent=self),
         )
 
-        self.register_outputs({
-            "bucket_name": self.bucket.bucket,
-            "bucket_arn": self.bucket.arn,
-            "lambda_role_arn": self.lambda_role.arn,
-        })
+        self.register_outputs(
+            {
+                "bucket_name": self.bucket.bucket,
+                "bucket_arn": self.bucket.arn,
+                "lambda_role_arn": self.lambda_role.arn,
+            }
+        )
 
     def add_notification(self, notification: dict):
         lambda_function = notification["function"]
