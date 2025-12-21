@@ -24,4 +24,4 @@ from cloud_foundry.pulumi.topic import topic
 
 from cloud_foundry.utils.names import resource_id
 
-version = "0.1.2"
+version = "0.1.3"
