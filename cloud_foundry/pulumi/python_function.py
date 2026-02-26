@@ -1,11 +1,14 @@
 # python_function.py
 
-from typing import Union
+from typing import Optional, Union
 import pulumi
 from cloud_foundry.utils.logger import logger
 
 from cloud_foundry.python_archive_builder import PythonArchiveBuilder
-from cloud_foundry.pulumi.function import Function
+from cloud_foundry.pulumi.function import (
+    Function,
+    PolicyStatementsInput,
+)
 
 log = logger(__name__)
 
@@ -14,14 +17,14 @@ def python_function(
     name: str,
     *,
     handler: str = None,
-    memory_size: int = None,
-    timeout: int = None,
+    memory_size: Optional[int] = None,
+    timeout: Optional[int] = None,
     sources: dict[str, str] = None,
-    requirements: list[str] = None,
-    policy_statements: list[str] = None,
-    environment: dict[str, Union[str, pulumi.Output[str]]] = None,
-    vpc_config: dict = None,
-    runtime: str = None,
+    requirements: Optional[list[str]] = None,
+    policy_statements: Optional[PolicyStatementsInput] = None,
+    environment: Optional[dict[str, Union[str, pulumi.Output[str]]]] = None,
+    vpc_config: Optional[dict] = None,
+    runtime: Optional[str] = None,
     opts=None,
 ) -> Function:
     archive_builder = PythonArchiveBuilder(

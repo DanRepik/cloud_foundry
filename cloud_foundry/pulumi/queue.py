@@ -124,12 +124,22 @@ class Queue(ComponentResource):
     def url(self) -> Output[str]:
         return self.queue.id
 
-    def subscribe(self, function: str | Function | aws.lambda_.Function) -> None:
+    def subscribe(
+        self,
+        function: str | Function | aws.lambda_.Function,
+        batch_size: Optional[int] = 10,
+        maximum_concurrency: Optional[int] = None,
+    ) -> None:
         """Add SQS queue as Lambda event source.
 
         Args:
             function: Either a function name (str), cloud_foundry Function,
                 or aws.lambda_.Function instance.
+            batch_size: Maximum number of messages to retrieve in a single
+                batch. Defaults to 10. Valid values: 1-10 for standard queues,
+                1-10000 for FIFO queues.
+            maximum_concurrency: Maximum number of concurrent Lambda function
+                invocations. Defaults to None (no limit). Valid values: 2-1000.
         """
         # Extract function name based on type
         if isinstance(function, Function):
@@ -146,12 +156,25 @@ class Queue(ComponentResource):
         elif isinstance(function, aws.lambda_.Function):
             depends_on.append(function)
 
+        # Build event source mapping arguments
+        mapping_args = {
+            "event_source_arn": self.queue.arn,
+            "function_name": function_name,
+            "batch_size": batch_size,
+            "opts": ResourceOptions(parent=self, depends_on=depends_on),
+        }
+
+        # Add maximum_concurrency if specified
+        if maximum_concurrency is not None:
+            mapping_args["scaling_config"] = (
+                aws.lambda_.EventSourceMappingScalingConfigArgs(
+                    maximum_concurrency=maximum_concurrency
+                )
+            )
+
         aws.lambda_.EventSourceMapping(
             f"{resource_id(self.name)}-source",
-            event_source_arn=self.queue.arn,
-            function_name=function_name,
-            batch_size=10,
-            opts=ResourceOptions(parent=self, depends_on=depends_on),
+            **mapping_args,
         )
 
 
