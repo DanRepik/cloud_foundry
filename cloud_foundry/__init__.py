@@ -19,9 +19,9 @@ from cloud_foundry.pulumi.document_repository import document_repository  # noqa
 from cloud_foundry.pulumi.cdn import cdn, CDN, CDNArgs  # noqa: F401
 from cloud_foundry.pulumi.domain import domain  # noqa: F401
 
-from cloud_foundry.pulumi.queue import queue
-from cloud_foundry.pulumi.topic import topic
+from cloud_foundry.pulumi.queue import queue  # noqa: F401
+from cloud_foundry.pulumi.topic import topic  # noqa: F401
 
-from cloud_foundry.utils.names import resource_id
+from cloud_foundry.utils.names import resource_id  # noqa: F401
 
-version = "0.1.3"
+version = "0.1.4"
