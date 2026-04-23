@@ -24,4 +24,4 @@ from cloud_foundry.pulumi.topic import topic  # noqa: F401
 
 from cloud_foundry.utils.names import resource_id  # noqa: F401
 
-version = "0.1.4"
+version = "0.1.5"
