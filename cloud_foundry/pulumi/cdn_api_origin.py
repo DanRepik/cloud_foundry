@@ -52,7 +52,10 @@ class ApiOrigin(pulumi.ComponentResource):
 
         self.origin_id = f"{name}-api"
         log.info(f"Creating API origin with ID: {self.origin_id}")
-        log.info(f"Domain name type: {type(domain_name)}, value: {domain_name}")
+        if isinstance(domain_name, pulumi.Output):
+            log.info("Domain name type: Pulumi Output")
+        else:
+            log.info(f"Domain name type: {type(domain_name)}, value: {domain_name}")
 
         # Configure custom headers if API key is provided
         custom_headers = []

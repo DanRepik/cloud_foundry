@@ -28,7 +28,7 @@ class UIPublisher(pulumi.ComponentResource):
 
     def __init__(
         self,
-        bucket: aws.s3.Bucket,
+        bucket,
         args: UIPublisherArgs,
         opts: pulumi.ResourceOptions = None,
     ):
@@ -37,7 +37,7 @@ class UIPublisher(pulumi.ComponentResource):
 
         Args:
             name (str): The name of the component.
-            bucket (aws.s3.Bucket): The S3 bucket to upload files to.
+            bucket: The S3 bucket resource to upload files to.
             args (UIPublisherArgs): The arguments for the UIPublisher component.
             opts (ResourceOptions): Optional resource options.
         """
@@ -75,18 +75,18 @@ class UIPublisher(pulumi.ComponentResource):
             for file in files
         ]
 
-    def upload_files(self, dir: str, bucket: aws.s3.Bucket, key: str = ""):
+    def upload_files(self, dir: str, bucket, key: str = ""):
         """
         Upload files from a directory to an S3 bucket.
 
         Args:
             dir (str): The directory containing the files to upload.
-            bucket (aws.s3.Bucket): The S3 bucket to upload files to.
+            bucket: The S3 bucket resource to upload files to.
             key (str): The prefix to add to the S3 keys (optional).
         """
         for item in self.remap_path_to_s3(dir, key):
             content_type, _ = guess_type(item["path"])
-            aws.s3.BucketObject(
+            aws.s3.BucketObjectv2(
                 item["key"],
                 bucket=bucket.id,
                 key=item["key"],

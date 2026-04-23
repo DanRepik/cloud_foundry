@@ -1,4 +1,5 @@
 # function.py
+import platform
 from typing import Any, Optional, TypeAlias, Union
 
 from cloud_foundry.utils.logger import logger
@@ -27,6 +28,7 @@ class Function(pulumi.ComponentResource):
         handler: Optional[str] = None,
         timeout: Optional[int] = None,
         memory_size: Optional[int] = None,
+        architectures: Optional[list[str]] = None,
         environment: dict[str, Union[str, pulumi.Output[str]]] = None,
         policy_statements: Optional[PolicyStatementsInput] = None,
         vpc_config: Optional[dict] = None,
@@ -41,6 +43,7 @@ class Function(pulumi.ComponentResource):
         self.handler = handler
         self.environment = environment or {}
         self.memory_size = memory_size
+        self.architectures = architectures
         self.timeout = timeout
         self.policy_statements = policy_statements or []
         self.vpc_config = vpc_config or {}
@@ -150,6 +153,7 @@ class Function(pulumi.ComponentResource):
             handler=self.handler or "app.handler",
             source_code_hash=self.hash,
             runtime=self.runtime or "python3.12",
+            architectures=self.architectures,
             environment=environment_args,
             vpc_config=vpc_config_args,
             opts=pulumi.ResourceOptions(
@@ -384,3 +388,13 @@ def function(
         vpc_config=vpc_config,
         opts=opts,
     )
+
+
+def default_lambda_architecture(
+    stack_name: str | None = None, host_machine: str | None = None
+) -> str:
+    resolved_stack = stack_name or pulumi.get_stack()
+    resolved_host = (host_machine or platform.machine()).lower()
+    if resolved_stack.startswith("local") and resolved_host in {"arm64", "aarch64"}:
+        return "arm64"
+    return "x86_64"

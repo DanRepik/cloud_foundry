@@ -1,10 +1,12 @@
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import zipfile
 import urllib
 import importlib.resources as pkg_resources
+import hashlib
 
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.hash_comparator import HashComparator
@@ -33,6 +35,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
         sources: dict[str, str],
         requirements: list[str],
         working_dir: str,
+        target_architecture: str = "x86_64",
     ):
         """
         Initialize the PythonArchiveBuilder with necessary parameters.
@@ -50,6 +53,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
         self._sources = sources
         self._requirements = requirements
         self._working_dir = working_dir
+        self._target_architecture = self._normalize_architecture(target_architecture)
 
         # Base directory where Lambda-related files will be stored
         self._base_dir = os.path.join(self._working_dir, f"{self.name}-lambda")
@@ -65,7 +69,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
 
         # Check for changes using a hash comparison
         hash_comparator = HashComparator()
-        new_hash = hash_comparator.hash_folder(self._staging)
+        new_hash = self._build_cache_hash(hash_comparator)
         old_hash = hash_comparator.read(self._base_dir)
         log.debug(f"old_hash: {old_hash}, new_hash: {new_hash}")
 
@@ -79,6 +83,34 @@ class PythonArchiveBuilder(ArchiveBuilder):
             self.build_archive()
             self._hash = new_hash
             hash_comparator.write(self._hash, self._base_dir)
+
+    def _build_cache_hash(self, hash_comparator: HashComparator) -> str:
+        staging_hash = hash_comparator.hash_folder(self._staging)
+        digest = hashlib.sha256()
+        digest.update(staging_hash.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(self._target_architecture.encode("utf-8"))
+        digest.update(b"\0")
+        for requirement in self._requirements:
+            digest.update(requirement.encode("utf-8"))
+            digest.update(b"\n")
+        return digest.hexdigest()
+
+    @staticmethod
+    def _normalize_architecture(architecture: str | None) -> str:
+        if not architecture:
+            return "x86_64"
+        normalized = architecture.strip().lower()
+        if normalized in {"arm64", "aarch64"}:
+            return "arm64"
+        return "x86_64"
+
+    @classmethod
+    def manylinux_platforms_for_architecture(cls, architecture: str | None) -> list[str]:
+        normalized = cls._normalize_architecture(architecture)
+        if normalized == "arm64":
+            return ["manylinux2014_aarch64", "manylinux_2_17_aarch64"]
+        return ["manylinux2014_x86_64", "manylinux_2_17_x86_64"]
 
     def hash(self) -> str:
         """Return the hash of the current archive."""
@@ -179,42 +211,16 @@ class PythonArchiveBuilder(ArchiveBuilder):
         # Try multiple strategies for installing packages
         install_success = False
 
-        # Strategy 1: Try with manylinux2014 platform wheels (Python 3.12 compatible)
-        log.info("Strategy 1: Attempting manylinux2014 platform wheels for Python 3.12")
-        try:
-            subprocess.check_call(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "--target",
-                    self._libs,
-                    "--platform",
-                    "manylinux2014_x86_64",
-                    "--only-binary=:all:",
-                    "--implementation",
-                    "cp",
-                    "--python-version",
-                    "3.12",
-                    "--upgrade",
-                    "-r",
-                    requirements_file,
-                ],
-                stderr=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-            )
-            install_success = True
-            log.info("✓ Successfully installed with manylinux2014 wheels")
-        except subprocess.CalledProcessError as e:
+        wheel_platforms = self.manylinux_platforms_for_architecture(
+            self._target_architecture
+        )
+        for index, wheel_platform in enumerate(wheel_platforms, start=1):
+            strategy_name = f"Strategy {index}"
             log.info(
-                f"✗ Strategy 1 failed: {e.stderr.decode() if e.stderr else 'Unknown error'}"
+                "%s: Attempting %s platform wheels for Python 3.12",
+                strategy_name,
+                wheel_platform,
             )
-            self.clean_folder(self._libs)
-
-        # Strategy 2: Try with manylinux_2_17 (broader compatibility for Python 3.12)
-        if not install_success:
-            log.info("Strategy 2: Attempting manylinux_2_17 platform wheels")
             try:
                 subprocess.check_call(
                     [
@@ -225,7 +231,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
                         "--target",
                         self._libs,
                         "--platform",
-                        "manylinux_2_17_x86_64",
+                        wheel_platform,
                         "--only-binary=:all:",
                         "--implementation",
                         "cp",
@@ -239,17 +245,21 @@ class PythonArchiveBuilder(ArchiveBuilder):
                     stdout=subprocess.PIPE,
                 )
                 install_success = True
-                log.info("✓ Successfully installed with manylinux_2_17 wheels")
+                log.info("✓ Successfully installed with %s wheels", wheel_platform)
+                break
             except subprocess.CalledProcessError as e:
                 log.info(
-                    f"✗ Strategy 2 failed: {e.stderr.decode() if e.stderr else 'Unknown error'}"
+                    "✗ %s failed: %s",
+                    strategy_name,
+                    e.stderr.decode() if e.stderr else "Unknown error",
                 )
                 self.clean_folder(self._libs)
 
         # Strategy 3: Fall back to regular install (builds from source for current platform)
         if not install_success:
             log.info(
-                "Strategy 3: Installing for current platform (may require building from source)"
+                "Strategy %s: Installing for current platform (may require building from source)",
+                len(wheel_platforms) + 1,
             )
             log.warning(
                 "⚠️  Installing packages for your local platform. "

@@ -102,3 +102,46 @@ def test_stage_resource_https_protocol(tmp_path):
     with mock.patch.object(builder, "_get_network_resource") as m:
         builder._stage_resource("https://example.com/file.txt", "dst")
         m.assert_called_once_with("https://example.com/file.txt", "dst")
+
+
+def test_manylinux_platforms_for_x86_64():
+    assert PythonArchiveBuilder.manylinux_platforms_for_architecture("x86_64") == [
+        "manylinux2014_x86_64",
+        "manylinux_2_17_x86_64",
+    ]
+
+
+def test_manylinux_platforms_for_arm64():
+    assert PythonArchiveBuilder.manylinux_platforms_for_architecture("arm64") == [
+        "manylinux2014_aarch64",
+        "manylinux_2_17_aarch64",
+    ]
+
+
+def test_cache_hash_includes_target_architecture_and_requirements(tmp_path):
+    common_kwargs = {
+        "name": "test",
+        "sources": {"handler.py": "def handler(event, context):\n    return event"},
+        "working_dir": str(tmp_path),
+    }
+    with mock.patch.object(PythonArchiveBuilder, "install_requirements"), mock.patch.object(
+        PythonArchiveBuilder, "build_archive"
+    ):
+        builder_x86 = PythonArchiveBuilder(
+            requirements=["psycopg2-binary==2.9.9"],
+            target_architecture="x86_64",
+            **common_kwargs,
+        )
+        builder_arm = PythonArchiveBuilder(
+            requirements=["psycopg2-binary==2.9.9"],
+            target_architecture="arm64",
+            **common_kwargs,
+        )
+        builder_req = PythonArchiveBuilder(
+            requirements=["psycopg2-binary==2.9.10"],
+            target_architecture="x86_64",
+            **common_kwargs,
+        )
+
+    assert builder_x86.hash() != builder_arm.hash()
+    assert builder_x86.hash() != builder_req.hash()

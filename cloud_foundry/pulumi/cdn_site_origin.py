@@ -48,7 +48,7 @@ class SiteOriginArgs(OriginArgs):
     def __init__(
         self,
         name: str,
-        bucket: Union[SiteBucket, aws.s3.Bucket, str] = None,
+        bucket: Union[SiteBucket, aws.s3.Bucket, aws.s3.BucketV2, str] = None,
         origin_path: str = None,
         origin_shield_region: str = None,
         is_target_origin: bool = False,
@@ -74,7 +74,7 @@ class SiteOrigin(pulumi.ComponentResource):
     def __init__(
         self,
         name: str,
-        bucket: Union[SiteBucket, aws.s3.Bucket, str],
+        bucket: Union[SiteBucket, aws.s3.Bucket, aws.s3.BucketV2, str],
         origin_path: str = None,
         origin_shield_region: str = None,
         opts: ResourceOptions = None,
@@ -82,17 +82,22 @@ class SiteOrigin(pulumi.ComponentResource):
         super().__init__("cloud_foundry:pulumi:SiteOrigin", name, {}, opts)
 
         self.name = name
+        self.bucket = None
         # Determine the bucket type and extract the necessary
         if isinstance(bucket, aws.s3.Bucket):
             self.bucket = bucket
+        elif isinstance(bucket, aws.s3.BucketV2):
+            self.bucket = bucket
         elif isinstance(bucket, SiteBucket):
             self.bucket = bucket.bucket
+        elif hasattr(bucket, "bucket") and hasattr(bucket.bucket, "bucket_regional_domain_name"):
+            self.bucket = bucket.bucket
         elif isinstance(bucket, str):
-            self.bucket = aws.s3.Bucket.get(bucket, bucket)
+            self.bucket = aws.s3.BucketV2.get(bucket, bucket)
 
         if self.bucket is None:
             raise ValueError(
-                "Invalid bucket type. Must be either aws.s3.Bucket or SiteBucket."
+                "Invalid bucket type. Must be aws.s3.Bucket, aws.s3.BucketV2, SiteBucket, or a bucket wrapper."
             )
 
         # Create Origin Access Control
@@ -105,9 +110,10 @@ class SiteOrigin(pulumi.ComponentResource):
             opts=ResourceOptions(parent=self),
         )
 
+        self.origin_id = f"{self.name}-site"
         self.distribution_origin = aws.cloudfront.DistributionOriginArgs(
             domain_name=self.bucket.bucket_regional_domain_name,
-            origin_id=f"{self.name}-site",
+            origin_id=self.origin_id,
             origin_access_control_id=origin_access_control.id,
             origin_path=origin_path,
             s3_origin_config=aws.cloudfront.DistributionOriginS3OriginConfigArgs(

@@ -8,6 +8,7 @@ from cloud_foundry.python_archive_builder import PythonArchiveBuilder
 from cloud_foundry.pulumi.function import (
     Function,
     PolicyStatementsInput,
+    default_lambda_architecture,
 )
 
 log = logger(__name__)
@@ -25,13 +26,16 @@ def python_function(
     environment: Optional[dict[str, Union[str, pulumi.Output[str]]]] = None,
     vpc_config: Optional[dict] = None,
     runtime: Optional[str] = None,
+    architecture: Optional[str] = None,
     opts=None,
 ) -> Function:
+    resolved_architecture = architecture or default_lambda_architecture()
     archive_builder = PythonArchiveBuilder(
         name=f"{name}-archive-builder",
         sources=sources,
         requirements=requirements,
         working_dir="temp",
+        target_architecture=resolved_architecture,
     )
     return Function(
         name=name,
@@ -44,5 +48,6 @@ def python_function(
         policy_statements=policy_statements,
         vpc_config=vpc_config,
         runtime=runtime,
+        architectures=[resolved_architecture],
         opts=opts,
     )

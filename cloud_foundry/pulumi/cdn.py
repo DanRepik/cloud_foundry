@@ -84,6 +84,7 @@ Configuration:
     - origins: List of origin configurations (see Origin Types above)
     - error_responses: Custom error response configurations
     - root_uri: Default root object (e.g., "index.html")
+    - web_acl_id: Optional WAFv2 Web ACL ARN/ID for the CloudFront distribution
     - whitelist_countries: ISO country codes to allow (exclusive with blacklist)
     - blacklist_countries: ISO country codes to block (default: CN, RU, CU, KP, IR, BY)
 
@@ -136,7 +137,10 @@ class CDNArgs:
         subdomain: Subdomain for the CDN (e.g., "www", "cdn", "api")
         site_domain_name: Base domain name for apex domain creation
         error_responses: List of custom error response configurations
+        default_function_associations: CloudFront Function associations for the
+            default cache behavior
         root_uri: Default root object for distribution (e.g., "index.html")
+        web_acl_id: Optional WAFv2 Web ACL ARN/ID associated with the distribution
         whitelist_countries: ISO country codes to allow (exclusive with blacklist)
         blacklist_countries: ISO country codes to block (default: CN, RU, CU, KP, IR, BY)
     """
@@ -149,7 +153,9 @@ class CDNArgs:
         subdomain: Optional[str] = None,
         site_domain_name: Optional[str] = None,
         error_responses: Optional[list] = None,
+        default_function_associations: Optional[list] = None,
         root_uri: Optional[str] = None,
+        web_acl_id: Optional[str] = None,
         whitelist_countries: Optional[List[str]] = None,
         blacklist_countries: Optional[List[str]] = None,
     ):
@@ -159,7 +165,9 @@ class CDNArgs:
         self.subdomain = subdomain
         self.site_domain_name = site_domain_name
         self.error_responses = error_responses
+        self.default_function_associations = default_function_associations
         self.root_uri = root_uri
+        self.web_acl_id = web_acl_id
         self.whitelist_countries = whitelist_countries
         self.blacklist_countries = blacklist_countries
 
@@ -272,6 +280,7 @@ class CDN(pulumi.ComponentResource):
                 response_headers_policy_id=aws.cloudfront.get_response_headers_policy(
                     name="Managed-SimpleCORS",
                 ).id,
+                function_associations=args.default_function_associations or None,
             ),
             ordered_cache_behaviors=caches,
             price_class="PriceClass_100",
@@ -292,6 +301,7 @@ class CDN(pulumi.ComponentResource):
                 "ssl_support_method": "sni-only",
                 "minimum_protocol_version": "TLSv1.2_2021",
             },
+            web_acl_id=args.web_acl_id,
             origins=origins,
             custom_error_responses=args.error_responses or [],
             opts=ResourceOptions(

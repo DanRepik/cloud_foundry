@@ -87,7 +87,10 @@ class Queue(ComponentResource):
             f"{name}-dlq",
             name=f"{resource_id(self.name)}-dlq",
             message_retention_seconds=1209600,  # 14 days
-            opts=ResourceOptions(parent=self),
+            opts=ResourceOptions(
+                parent=self,
+                ignore_changes=["region", "tagsAll"],
+            ),
         )
 
         # Main queue
@@ -104,7 +107,10 @@ class Queue(ComponentResource):
                     }
                 )
             ),
-            opts=ResourceOptions(parent=self),
+            opts=ResourceOptions(
+                parent=self,
+                ignore_changes=["region", "tagsAll"],
+            ),
         )
 
         # Register outputs to signal component completion
@@ -161,7 +167,11 @@ class Queue(ComponentResource):
             "event_source_arn": self.queue.arn,
             "function_name": function_name,
             "batch_size": batch_size,
-            "opts": ResourceOptions(parent=self, depends_on=depends_on),
+            "opts": ResourceOptions(
+                parent=self,
+                depends_on=depends_on,
+                ignore_changes=["region", "tagsAll"],
+            ),
         }
 
         # Add maximum_concurrency if specified
