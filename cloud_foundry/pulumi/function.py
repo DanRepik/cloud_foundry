@@ -393,8 +393,16 @@ def function(
 def default_lambda_architecture(
     stack_name: str | None = None, host_machine: str | None = None
 ) -> str:
+    config_override = (pulumi.Config().get("lambda_architecture") or "").strip().lower()
+    if config_override:
+        return "arm64" if config_override in {"arm64", "aarch64"} else "x86_64"
+
     resolved_stack = stack_name or pulumi.get_stack()
     resolved_host = (host_machine or platform.machine()).lower()
-    if resolved_stack.startswith("local") and resolved_host in {"arm64", "aarch64"}:
-        return "arm64"
+    if resolved_stack.startswith("local"):
+        # Default local stacks to x86_64 so LocalStack Lambda execution matches
+        # the packaged wheel set unless an explicit override requests arm64.
+        return "x86_64"
+    if resolved_host in {"arm64", "aarch64"}:
+        return "x86_64"
     return "x86_64"
