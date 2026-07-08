@@ -64,30 +64,36 @@ class PythonArchiveBuilder(ArchiveBuilder):
         # Final location of the ZIP archive
         self._location = os.path.join(self._base_dir, f"{self.name}.zip")
 
-        # Prepare staging areas and install sources
+        # Prepare staging areas and install sources.
+        # Install dependencies before computing the cache hash so unpinned
+        # package updates can invalidate the archive even when the
+        # requirement string itself is unchanged.
         self.prepare()
+        self.install_requirements()
 
-        # Check for changes using a hash comparison
+        # Check for changes using a hash comparison. The cache key includes
+        # the resolved dependency contents under libs/.
         hash_comparator = HashComparator()
         new_hash = self._build_cache_hash(hash_comparator)
         old_hash = hash_comparator.read(self._base_dir)
         log.debug(f"old_hash: {old_hash}, new_hash: {new_hash}")
 
-        if old_hash == new_hash:
-            # If the hash matches, use the existing archive
+        if old_hash == new_hash and os.path.exists(self._location):
+            # If the hash matches and the archive already exists, reuse it.
             self._hash = old_hash or ""
         else:
-            # Otherwise, install the requirements, build a new archive, and
-            # update the hash
-            self.install_requirements()
+            # Otherwise, build a new archive and update the hash.
             self.build_archive()
             self._hash = new_hash
             hash_comparator.write(self._hash, self._base_dir)
 
     def _build_cache_hash(self, hash_comparator: HashComparator) -> str:
         staging_hash = hash_comparator.hash_folder(self._staging)
+        libs_hash = hash_comparator.hash_folder(self._libs)
         digest = hashlib.sha256()
         digest.update(staging_hash.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(libs_hash.encode("utf-8"))
         digest.update(b"\0")
         digest.update(self._target_architecture.encode("utf-8"))
         digest.update(b"\0")
@@ -106,7 +112,9 @@ class PythonArchiveBuilder(ArchiveBuilder):
         return "x86_64"
 
     @classmethod
-    def manylinux_platforms_for_architecture(cls, architecture: str | None) -> list[str]:
+    def manylinux_platforms_for_architecture(
+        cls, architecture: str | None
+    ) -> list[str]:
         normalized = cls._normalize_architecture(architecture)
         if normalized == "arm64":
             return ["manylinux2014_aarch64", "manylinux_2_17_aarch64"]

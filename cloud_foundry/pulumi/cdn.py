@@ -242,11 +242,9 @@ class CDN(pulumi.ComponentResource):
             include_apex=args.create_apex,
         )
 
-        aliases_list = (
-            [self.domain_name, args.site_domain_name]
-            if args.create_apex
-            else [self.domain_name]
-        )
+        aliases_list = [self.domain_name]
+        if args.create_apex and args.site_domain_name:
+            aliases_list.append(args.site_domain_name)
 
         origins, caches, target_origin_id = self.get_origins(name, args.origins)
         self.distribution = aws.cloudfront.Distribution(
@@ -614,6 +612,7 @@ def cdn(
     origins: list[dict],
     hosted_zone_id: Optional[str] = None,
     subdomain: Optional[str] = None,
+    site_domain_name: Optional[str] = None,
     error_responses: Optional[list] = None,
     create_apex: Optional[bool] = False,
     root_uri: Optional[str] = None,
@@ -629,6 +628,7 @@ def cdn(
         origins: List of origin configuration dicts
         hosted_zone_id: Route53 hosted zone ID for custom domain
         subdomain: Subdomain for CDN (e.g., "www", "cdn")
+        site_domain_name: Base domain used when creating an apex alias
         error_responses: Custom error response configurations
         create_apex: Create apex domain A record (default: False)
         root_uri: Default root object (e.g., "index.html")
@@ -658,6 +658,7 @@ def cdn(
             origins=origins,
             hosted_zone_id=hosted_zone_id,
             subdomain=subdomain,
+            site_domain_name=site_domain_name,
             error_responses=error_responses,
             create_apex=create_apex,
             root_uri=root_uri,
