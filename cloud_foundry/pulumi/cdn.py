@@ -265,11 +265,13 @@ class CDN(pulumi.ComponentResource):
                 allowed_methods=["GET", "HEAD", "OPTIONS"],
                 cached_methods=["GET", "HEAD"],
                 forwarded_values=aws.cloudfront.DistributionDefaultCacheBehaviorForwardedValuesArgs(
-                    query_string=True,
+                    # Keep the static-site cache key tight. API and auth paths get
+                    # their own ordered cache behaviors.
+                    query_string=False,
                     cookies=aws.cloudfront.DistributionDefaultCacheBehaviorForwardedValuesCookiesArgs(
-                        forward="all"
+                        forward="none"
                     ),
-                    headers=["Authorization"],
+                    headers=[],
                 ),
                 compress=True,
                 default_ttl=86400,

@@ -51,6 +51,46 @@ class UIPublisher(pulumi.ComponentResource):
 
         self.register_outputs({})
 
+    @staticmethod
+    def cache_control_for_key(key: str) -> str:
+        """Return a conservative cache policy for a static site object."""
+        normalized = key.lower().lstrip("/")
+
+        if normalized == "_payload.json" or normalized.endswith("/_payload.json"):
+            return "public, max-age=31536000, immutable"
+
+        if normalized.startswith("_nuxt/"):
+            return "public, max-age=31536000, immutable"
+
+        if normalized.endswith(".html"):
+            return "public, max-age=300, s-maxage=86400, stale-while-revalidate=3600"
+
+        if normalized.endswith(
+            (
+                ".js",
+                ".mjs",
+                ".css",
+                ".svg",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".gif",
+                ".webp",
+                ".ico",
+                ".woff",
+                ".woff2",
+                ".ttf",
+                ".otf",
+                ".eot",
+            )
+        ):
+            return "public, max-age=31536000, immutable"
+
+        if normalized.endswith((".json", ".xml", ".txt", ".webmanifest")):
+            return "public, max-age=3600, stale-while-revalidate=300"
+
+        return "public, max-age=3600"
+
     def remap_path_to_s3(self, dir_base: str, key_base: str):
         """
         Remap local file paths to S3 keys.
@@ -92,5 +132,6 @@ class UIPublisher(pulumi.ComponentResource):
                 key=item["key"],
                 source=pulumi.FileAsset(item["path"]),
                 content_type=content_type,
+                cache_control=self.cache_control_for_key(item["key"]),
                 opts=pulumi.ResourceOptions(parent=self, depends_on=[bucket]),
             )
