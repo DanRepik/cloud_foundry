@@ -26,7 +26,7 @@ class AuthorizationServices:
     ):
         self.user_pool_id = user_pool_id or os.getenv("USER_POOL_ID")
         self.client_id = client_id or os.getenv("CLIENT_ID")
-        self.client_secret = client_secret or os.getenv("USER_ADMIN_GROUP")
+        self.client_secret = client_secret or os.getenv("CLIENT_SECRET")
         self.user_admin_group = user_admin_group or os.getenv("USER_ADMIN_GROUP")
         self.user_default_group = user_default_group or os.getenv("USER_DEFAULT_GROUP")
         region = os.getenv("AWS_REGION")
@@ -266,8 +266,6 @@ class AuthorizationServices:
             }
 
     def create_session(self, event):
-        # Log all the request headers
-        headers = event.get("headers", {})
         body = json.loads(event["body"])
         username = body.get("username") or body.get("email")
         password = body.get("password")

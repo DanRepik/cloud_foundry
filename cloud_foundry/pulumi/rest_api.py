@@ -9,6 +9,7 @@ import pulumi
 import pulumi_aws as aws
 
 from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
+from cloud_foundry.pulumi.api_waf import GatewayRestApiWAF, RestAPIFirewall
 from cloud_foundry.pulumi.custom_domain import CustomGatewayDomain
 from cloud_foundry.utils.names import resource_id
 
@@ -77,6 +78,7 @@ class RestAPI(pulumi.ComponentResource):
         self.specification = specification
         self.content = content or []
         self.editor = AWSOpenAPISpecEditor(specification)
+        self.cors_origins = cors_origins
         self.firewall = firewall
         self.enable_logging = enable_logging
         self.path_prefix = path_prefix
@@ -93,6 +95,9 @@ class RestAPI(pulumi.ComponentResource):
             lambda resolved_arns: self._create_rest_api(resolved_arns)
         )
         self.rest_api_id = self.rest_api.id
+
+        # Optionally create a WAF Web ACL to attach to the stage
+        self.waf = self._create_waf() if self.firewall else None
 
         # Create the API Gateway stage
         self.stage = self.rest_api.apply(lambda rest_api: self._create_stage(rest_api))
@@ -241,6 +246,15 @@ class RestAPI(pulumi.ComponentResource):
             log.info("Adding path prefix: %s to all paths", self.path_prefix)
             self.editor.prefix_paths(self.path_prefix)
 
+        if self.cors_origins:
+            origins = (
+                self.cors_origins
+                if isinstance(self.cors_origins, list)
+                else [self.cors_origins]
+            )
+            log.info("Enabling CORS for origins: %s", origins)
+            self.editor.cors_origins(origins)
+
         for arn_slice in self.arn_alloc:
             if arn_slice["type"] == "integration":
                 # Apply prefix to integration path to match the prefixed spec paths
@@ -344,6 +358,7 @@ class RestAPI(pulumi.ComponentResource):
                 rest_api=rest_api.id,
                 deployment=deployment.id,
                 stage_name=self.name,
+                web_acl_arn=self.waf.arn if self.waf else None,
                 access_log_settings={
                     "destinationArn": log_group.arn,
                     "format": json.dumps(
@@ -373,8 +388,22 @@ class RestAPI(pulumi.ComponentResource):
             rest_api=rest_api.id,
             deployment=deployment.id,
             stage_name=self.name,
+            web_acl_arn=self.waf.arn if self.waf else None,
             opts=pulumi.ResourceOptions(parent=self, depends_on=[deployment, rest_api]),
         )
+
+    def _create_waf(self) -> GatewayRestApiWAF:
+        """
+        Create a WAF Web ACL from the `firewall` configuration. The resulting
+        Web ACL is attached to the API Gateway stage via its `web_acl_arn`.
+        """
+        log.info("Creating WAF for REST API %s", self.name)
+        firewall_config = (
+            self.firewall
+            if isinstance(self.firewall, RestAPIFirewall)
+            else RestAPIFirewall(**self.firewall)
+        )
+        return GatewayRestApiWAF(self.name, firewall=firewall_config)
 
     def create_custom_domain(self, hosted_zone_id: str, subdomain: str) -> str:
 

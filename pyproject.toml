@@ -38,7 +38,8 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = [".."]
-testpaths = ["infra"]
+testpaths = ["tests"]
+addopts = "--ignore=examples"
 markers = [
     "unit: marks tests as unit tests that do not require a database",
     "integration: marks tests that operate on a real database",
