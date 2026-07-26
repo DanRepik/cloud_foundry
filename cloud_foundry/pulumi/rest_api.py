@@ -547,12 +547,21 @@ class RestAPI(pulumi.ComponentResource):
         if not self.content:
             return None
 
+        content_with_bucket = [item for item in self.content if "bucket_name" in item]
+        prefixes = [item.get("prefix") for item in content_with_bucket]
+
         def generate_s3_policy(buckets):
             log.info("Buckets for S3 policy: %s", buckets)
             resources = []
-            for bucket in buckets:
-                resources.append(f"arn:aws:s3:::{bucket}")
-                resources.append(f"arn:aws:s3:::{bucket}/*")
+            for bucket, prefix in zip(buckets, prefixes):
+                # Scope the grant to the configured prefix when present,
+                # rather than the whole bucket, so a shared bucket isn't
+                # over-granted just because one content mapping uses it.
+                if prefix:
+                    resources.append(f"arn:aws:s3:::{bucket}/{prefix}/*")
+                else:
+                    resources.append(f"arn:aws:s3:::{bucket}")
+                    resources.append(f"arn:aws:s3:::{bucket}/*")
             return json.dumps(
                 {
                     "Version": "2012-10-17",
@@ -566,9 +575,7 @@ class RestAPI(pulumi.ComponentResource):
                 }
             )
 
-        bucket_names = [
-            item["bucket_name"] for item in self.content if "bucket_name" in item
-        ]
+        bucket_names = [item["bucket_name"] for item in content_with_bucket]
         log.info(f"Bucket names: {bucket_names}")
 
         # Create a policy to allow API Gateway access to the given S3 buckets.
@@ -604,6 +611,7 @@ class RestAPI(pulumi.ComponentResource):
         # Attach the S3 access policy to the role.
         aws.iam.RolePolicyAttachment(
             f"{self.name}-s3-access-attachment",
+            role=api_gateway_role.name,
             policy_arn=s3_policy.arn,
             opts=pulumi.ResourceOptions(parent=self),
         )
