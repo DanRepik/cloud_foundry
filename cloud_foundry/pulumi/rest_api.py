@@ -352,12 +352,11 @@ class RestAPI(pulumi.ComponentResource):
                 retention_in_days=3,
                 opts=pulumi.ResourceOptions(parent=self, retain_on_delete=False),
             )
-            return aws.apigateway.Stage(
+            stage = aws.apigateway.Stage(
                 f"{self.name}-stage",
                 rest_api=rest_api.id,
                 deployment=deployment.id,
                 stage_name=self.name,
-                web_acl_arn=self.waf.arn if self.waf else None,
                 access_log_settings={
                     "destinationArn": log_group.arn,
                     "format": json.dumps(
@@ -382,19 +381,33 @@ class RestAPI(pulumi.ComponentResource):
                     depends_on=[deployment],
                 ),
             )
-        return aws.apigateway.Stage(
-            f"{self.name}-stage",
-            rest_api=rest_api.id,
-            deployment=deployment.id,
-            stage_name=self.name,
-            web_acl_arn=self.waf.arn if self.waf else None,
-            opts=pulumi.ResourceOptions(parent=self, depends_on=[deployment, rest_api]),
-        )
+        else:
+            stage = aws.apigateway.Stage(
+                f"{self.name}-stage",
+                rest_api=rest_api.id,
+                deployment=deployment.id,
+                stage_name=self.name,
+                opts=pulumi.ResourceOptions(
+                    parent=self, depends_on=[deployment, rest_api]
+                ),
+            )
+
+        if self.waf:
+            aws.wafv2.WebAclAssociation(
+                f"{self.name}-waf-association",
+                resource_arn=stage.arn,
+                web_acl_arn=self.waf.arn,
+                opts=pulumi.ResourceOptions(parent=self, depends_on=[stage]),
+            )
+
+        return stage
 
     def _create_waf(self) -> GatewayRestApiWAF:
         """
         Create a WAF Web ACL from the `firewall` configuration. The resulting
-        Web ACL is attached to the API Gateway stage via its `web_acl_arn`.
+        Web ACL is associated with the API Gateway stage via a
+        aws.wafv2.WebAclAssociation (Stage.web_acl_arn is a read-only
+        attribute in current pulumi_aws versions, not a settable input).
         """
         log.info("Creating WAF for REST API %s", self.name)
         firewall_config = (
