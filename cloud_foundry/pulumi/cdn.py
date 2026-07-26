@@ -102,7 +102,11 @@ from typing import List, Optional
 
 from cloud_foundry.pulumi.cdn_api_origin import ApiOrigin
 from cloud_foundry.pulumi.cdn_site_origin import SiteOrigin
-from cloud_foundry.pulumi.custom_domain import CustomCertificate, domain_from_subdomain
+from cloud_foundry.pulumi.custom_domain import (
+    CustomCertificate,
+    CustomGatewayDomain,
+    domain_from_subdomain,
+)
 from cloud_foundry.pulumi.rest_api import RestAPI
 from cloud_foundry.utils.logger import logger
 
@@ -436,15 +440,17 @@ class CDN(pulumi.ComponentResource):
                         )
                 else:
                     if isinstance(rest_api, aws.apigateway.RestApi):
-                        domain_name = self.setup_custom_domain(
-                            name=origin_name,
+                        gateway_domain = CustomGatewayDomain(
+                            origin_name,
                             hosted_zone_id=self.hosted_zone_id,
-                            domain_name=pulumi.Output.concat(
-                                origin_name, "-", pulumi.get_stack()
+                            subdomain=pulumi.Output.concat(
+                                origin_name, "-", self.subdomain
                             ),
-                            stage_name=rest_api.name,
                             rest_api_id=rest_api.id,
+                            stage_name=rest_api.name,
+                            opts=ResourceOptions(parent=self),
                         )
+                        domain_name = gateway_domain.domain_name
 
                 if domain_name is None:
                     raise ValueError(
@@ -473,149 +479,6 @@ class CDN(pulumi.ComponentResource):
 
         log.info(f"Configured target origin ID: {target_origin_id}")
         return cdn_origins, caches, target_origin_id
-
-    def set_up_certificate(
-        self, name, domain_name, alternative_names: Optional[List[str]] = None
-    ):
-        """Provision and validate ACM certificate for custom domain.
-
-        Creates an ACM certificate with DNS validation via Route53. Automatically
-        creates validation DNS records and waits for certificate validation.
-
-        Args:
-            name: Resource name prefix
-            domain_name: Primary domain name for certificate
-            alternative_names: List of Subject Alternative Names (SANs)
-
-        Returns:
-            Tuple of (certificate, validation) resources
-
-        Raises:
-            ValueError: If hosted_zone_id is not configured
-        """
-        if not self.hosted_zone_id:
-            raise ValueError(
-                "Hosted zone ID is required for custom domain setup. "
-                + f"domain_name: {domain_name}."
-            )
-
-        certificate = aws.acm.Certificate(
-            f"{name}-certificate",
-            domain_name=domain_name,
-            subject_alternative_names=alternative_names,
-            validation_method="DNS",
-            opts=ResourceOptions(parent=self),
-        )
-
-        validation_options = certificate.domain_validation_options.apply(
-            lambda options: options
-        )
-
-        dns_records = validation_options.apply(
-            lambda options: [
-                aws.route53.Record(
-                    f"{name}-validation-record-{option.resource_record_name}",
-                    name=option.resource_record_name,
-                    zone_id=self.hosted_zone_id,
-                    type=option.resource_record_type,
-                    records=[option.resource_record_value],
-                    ttl=60,
-                    opts=ResourceOptions(parent=self),
-                )
-                for option in options
-            ]
-        )
-
-        validation = dns_records.apply(
-            lambda records: aws.acm.CertificateValidation(
-                f"{name}-certificate-validation",
-                certificate_arn=certificate.arn,
-                validation_record_fqdns=[record.fqdn for record in records],
-                opts=ResourceOptions(parent=self),
-            )
-        )
-
-        return certificate, validation
-
-    def setup_custom_domain(
-        self,
-        name: str,
-        hosted_zone_id: str,
-        domain_name: str,
-        stage_name: str,
-        rest_api_id,
-    ):
-        """Configure custom domain for API Gateway REST API.
-
-        Creates ACM certificate, API Gateway domain name, base path mapping,
-        and Route53 DNS record for a custom domain pointing to an API Gateway.
-
-        Args:
-            name: Resource name prefix
-            hosted_zone_id: Route53 hosted zone ID for DNS
-            domain_name: Custom domain name
-            stage_name: API Gateway stage name
-            rest_api_id: API Gateway REST API ID
-
-        Returns:
-            The configured domain name string
-        """
-        certificate, validation = self.set_up_certificate(name, domain_name)
-
-        custom_domain = aws.apigateway.DomainName(
-            f"{name}-custom-domain",
-            domain_name=domain_name,
-            regional_certificate_arn=certificate.arn,
-            endpoint_configuration={
-                "types": "REGIONAL",
-            },
-            opts=pulumi.ResourceOptions(parent=self, depends_on=[validation]),
-        )
-
-        # Define the base path mapping
-        aws.apigateway.BasePathMapping(
-            f"{name}-base-path-map",
-            rest_api=rest_api_id,
-            stage_name=stage_name,
-            domain_name=custom_domain.domain_name,
-            opts=pulumi.ResourceOptions(parent=self, depends_on=[custom_domain]),
-        )
-
-        # Define the DNS record
-        aws.route53.Record(
-            f"{name}-dns-record",
-            name=custom_domain.domain_name,
-            type="A",
-            zone_id=hosted_zone_id,
-            aliases=[
-                {
-                    "name": custom_domain.regional_domain_name,
-                    "zone_id": custom_domain.regional_zone_id,
-                    "evaluate_target_health": False,
-                }
-            ],
-            opts=pulumi.ResourceOptions(parent=self, depends_on=[custom_domain]),
-        )
-
-        return domain_name
-
-    def find_hosted_zone_id(self, name: str) -> str:
-        """Find Route53 hosted zone ID by domain name.
-
-        Placeholder method for looking up hosted zone ID dynamically.
-
-        Args:
-            name: Domain name to search for
-
-        Returns:
-            Hosted zone ID string
-
-        Note:
-            This method is not yet implemented. Pass hosted_zone_id
-            directly in CDNArgs instead.
-        """
-        # Implement your logic to find the hosted zone ID
-        pass
 
 
 def cdn(

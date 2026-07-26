@@ -14,9 +14,10 @@ Two bugs fixed here:
    `rest_api` local variable instead.
 
 These tests use pulumi's mock runtime (no AWS/network access required)
-and monkeypatch CDN.setup_custom_domain so the test only has to verify
-get_origins() resolves the right values and doesn't crash, without also
-mocking the full ACM/Route53 certificate validation chain.
+and monkeypatch the CustomGatewayDomain class used by get_origins() so
+the test only has to verify the right values are resolved and passed
+through, without also mocking the full ACM/Route53 certificate
+validation chain that CustomGatewayDomain itself performs.
 """
 
 import asyncio
@@ -25,6 +26,7 @@ import pulumi
 import pulumi_aws as aws
 import pytest
 
+import cloud_foundry.pulumi.cdn as cdn_module
 from cloud_foundry.pulumi.cdn import CDN
 
 
@@ -64,20 +66,27 @@ def cdn_instance():
     return cdn
 
 
+class FakeGatewayDomain:
+    def __init__(self, name, **kwargs):
+        self.name = name
+        self.kwargs = kwargs
+        self.domain_name = "resolved.example.com"
+
+
 @pytest.mark.unit
 def test_get_origins_with_plain_rest_api_resolves_from_local_variable(
     cdn_instance, monkeypatch
 ):
     calls = []
 
-    def fake_setup_custom_domain(self, **kwargs):
-        resolved = {}
-        kwargs["stage_name"].apply(lambda v: resolved.__setitem__("stage_name", v))
+    def fake_gateway_domain(name, **kwargs):
+        resolved = {"name": name}
         kwargs["rest_api_id"].apply(lambda v: resolved.__setitem__("rest_api_id", v))
+        kwargs["stage_name"].apply(lambda v: resolved.__setitem__("stage_name", v))
         calls.append(resolved)
-        return "resolved.example.com"
+        return FakeGatewayDomain(name, **kwargs)
 
-    monkeypatch.setattr(CDN, "setup_custom_domain", fake_setup_custom_domain)
+    monkeypatch.setattr(cdn_module, "CustomGatewayDomain", fake_gateway_domain)
 
     plain_rest_api = aws.apigateway.RestApi("plain-rest-api")
 
