@@ -169,13 +169,18 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             method (str): The HTTP method (e.g., "post").
             function_name (str): The name of the Lambda function.
             invoke_arn (str): The ARN of the Lambda function to integrate with.
+
+        Raises:
+            ValueError: If the path/method is not already declared in the
+                base OpenAPI spec, so a misconfigured integration fails
+                the deploy loudly instead of silently wiring up nothing.
         """
-        operation = self.get_or_create_spec_part(["paths", path, method], create=True)
-        if not operation:
-            log.warning(
-                f"Operation for path '{path}' and method '{method}' does not exist."
+        operation = self.get_spec_part(["paths", path, method])
+        if operation is None:
+            raise ValueError(
+                f"Cannot add integration: operation for path '{path}' and "
+                f"method '{method}' is not declared in the OpenAPI spec."
             )
-            return
 
         operation["x-function-name"] = function_name
         operation["x-amazon-apigateway-integration"] = {
@@ -332,6 +337,19 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             cors_origins (List[str]): A list of allowed origins for CORS.
         """
         paths = self.get_or_create_spec_part(["paths"], True)
+
+        if len(cors_origins) == 1:
+            allow_origin_value = f"'{cors_origins[0]}'"
+        else:
+            # Access-Control-Allow-Origin must be a single origin (or '*'),
+            # never a comma-joined list - browsers reject that outright.
+            # With more than one configured origin, reflect the requesting
+            # browser's Origin header instead of a static value. Note this
+            # does not enforce cors_origins as a strict server-side
+            # allow-list for the multi-origin case; that would require a
+            # Lambda authorizer or a VTL-based response override.
+            allow_origin_value = "method.request.header.origin"
+
         for path in paths:
             paths[path]["options"] = {
                 "responses": {
@@ -351,7 +369,7 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
                             "responseParameters": {
                                 "method.response.header.Access-Control-Allow-Methods": "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'",
                                 "method.response.header.Access-Control-Allow-Headers": "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'",
-                                "method.response.header.Access-Control-Allow-Origin": f"'{','.join(cors_origins)}'",
+                                "method.response.header.Access-Control-Allow-Origin": allow_origin_value,
                             },
                         },
                     },
