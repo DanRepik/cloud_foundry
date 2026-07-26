@@ -1,7 +1,6 @@
 # rest_api.py
 
 import json
-import logging
 import os
 from typing import Optional, Union
 
@@ -11,10 +10,10 @@ import pulumi_aws as aws
 from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
 from cloud_foundry.pulumi.api_waf import GatewayRestApiWAF, RestAPIFirewall
 from cloud_foundry.pulumi.custom_domain import CustomGatewayDomain
+from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.names import resource_id
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
+log = logger(__name__)
 
 
 class RestAPI(pulumi.ComponentResource):

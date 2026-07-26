@@ -1,5 +1,4 @@
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -376,27 +375,6 @@ class PythonArchiveBuilder(ArchiveBuilder):
             raise FileNotFoundError(
                 f"Source path {source_path} does not exist and no default value provided"
             )
-        """
-        Copy a file or folder from source_path to destination_path.
-
-        Args:
-            source_path (str): The path to the source file or folder.
-            destination_path (str): The path to copy the file or folder to.
-        """
-        # If source_path doesn't start with '/', treat it as relative to the current working directory
-        if not os.path.isabs(source_path):
-            source_path = os.path.join(os.getcwd(), source_path)
-        if os.path.isdir(source_path):
-            # Copy directory recursively
-            if os.path.exists(destination_path):
-                shutil.rmtree(destination_path)
-            shutil.copytree(source_path, destination_path)
-            log.info(f"Directory copied from {source_path} to {destination_path}")
-        else:
-            # Copy single file
-            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
-            shutil.copy2(source_path, destination_path)
-            log.info(f"File copied from {source_path} to {destination_path}")
 
     def _stage_resource(self, source_path: str, destination_path: str):
         """

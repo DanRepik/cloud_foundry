@@ -1,11 +1,11 @@
-from pulumi import ComponentResource, ResourceOptions, Output
-import pulumi_aws as aws
+from pulumi import ComponentResource
 from importlib import resources
-import json
-from cloud_foundry.utils.names import resource_id
+from cloud_foundry.utils.logger import logger
 from cloud_foundry.pulumi.python_function import python_function
 from cloud_foundry.pulumi.publisher import publisher
 from cloud_foundry.utils.names import account_id, region
+
+log = logger(__name__)
 
 
 class MailPublisher(ComponentResource):
@@ -17,8 +17,7 @@ class MailPublisher(ComponentResource):
         with resources.open_text("cloud_foundry", "services/mail_publisher.py") as file:
             mail_sender_code = file.read()
 
-        function_name = f"{resource_id(name)}-lambda"
-        print(f"mail_identity: {mail_identity}")
+        log.info("mail_identity: %s", mail_identity)
         # Create the Lambda Function
         publisher_function = python_function(
             f"{name}-lambda",
@@ -51,7 +50,7 @@ class MailPublisher(ComponentResource):
 
         self.register_outputs(
             {
-                "topic_arn": self.topic.arn,
+                "topic_arn": self.mail_publisher.topic.arn,
                 "lambda_function_name": publisher_function.name,
             }
         )

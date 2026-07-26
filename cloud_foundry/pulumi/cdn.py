@@ -143,6 +143,8 @@ class CDNArgs:
         web_acl_id: Optional WAFv2 Web ACL ARN/ID associated with the distribution
         whitelist_countries: ISO country codes to allow (exclusive with blacklist)
         blacklist_countries: ISO country codes to block (default: CN, RU, CU, KP, IR, BY)
+        logging_bucket: Optional S3 bucket (e.g. "my-logs.s3.amazonaws.com") to
+            receive CloudFront access logs. Logging is disabled if omitted.
     """
 
     def __init__(
@@ -158,6 +160,7 @@ class CDNArgs:
         web_acl_id: Optional[str] = None,
         whitelist_countries: Optional[List[str]] = None,
         blacklist_countries: Optional[List[str]] = None,
+        logging_bucket: Optional[str] = None,
     ):
         self.origins = origins
         self.create_apex = create_apex
@@ -170,6 +173,7 @@ class CDNArgs:
         self.web_acl_id = web_acl_id
         self.whitelist_countries = whitelist_countries
         self.blacklist_countries = blacklist_countries
+        self.logging_bucket = logging_bucket
 
 
 class CDN(pulumi.ComponentResource):
@@ -253,10 +257,14 @@ class CDN(pulumi.ComponentResource):
             enabled=True,
             is_ipv6_enabled=True,
             default_root_object=args.root_uri,
-            logging_config=aws.cloudfront.DistributionLoggingConfigArgs(
-                bucket="yokchi-cloudfront-logs.s3.amazonaws.com",
-                include_cookies=False,
-                prefix="logs/",
+            logging_config=(
+                aws.cloudfront.DistributionLoggingConfigArgs(
+                    bucket=args.logging_bucket,
+                    include_cookies=False,
+                    prefix="logs/",
+                )
+                if args.logging_bucket
+                else None
             ),
             aliases=aliases_list,
             default_cache_behavior=aws.cloudfront.DistributionDefaultCacheBehaviorArgs(
@@ -618,6 +626,7 @@ def cdn(
     error_responses: Optional[list] = None,
     create_apex: Optional[bool] = False,
     root_uri: Optional[str] = None,
+    logging_bucket: Optional[str] = None,
     opts: ResourceOptions = None,
 ) -> CDN:
     """Factory function to create a CDN component.
@@ -634,6 +643,8 @@ def cdn(
         error_responses: Custom error response configurations
         create_apex: Create apex domain A record (default: False)
         root_uri: Default root object (e.g., "index.html")
+        logging_bucket: Optional S3 bucket to receive CloudFront access
+            logs. Logging is disabled if omitted.
         opts: Pulumi resource options
 
     Returns:
@@ -664,6 +675,7 @@ def cdn(
             error_responses=error_responses,
             create_apex=create_apex,
             root_uri=root_uri,
+            logging_bucket=logging_bucket,
         ),
         opts,
     )

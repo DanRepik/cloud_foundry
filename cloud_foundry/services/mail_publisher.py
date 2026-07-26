@@ -40,22 +40,6 @@ def handler(event, context):
                 {"message": "Emails sent successfully", "responses": responses}
             ),
         }
-        template_name = sns_message["template_name"]
-        context_data = sns_message["context"]
-        recipients = sns_message["recipients"]
-        subject = sns_message["subject"]
-        cc = sns_message.get("cc", [])  # Get CC list, default to an empty list
-        bcc = sns_message.get("bcc", [])  # Get BCC list, default to an empty list
-
-        email_body = render_template(template_name, context_data)
-        response = send_email(recipients, subject, email_body, cc, bcc)
-
-        return {
-            "statusCode": 200,
-            "body": json.dumps(
-                {"message": "Email sent successfully", "response": response}
-            ),
-        }
     except Exception as e:
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 

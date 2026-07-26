@@ -1,5 +1,5 @@
 import pulumi
-import subprocess
+import pulumi_aws as aws
 
 
 _account_id = None
@@ -8,18 +8,7 @@ _account_id = None
 def account_id() -> str:
     global _account_id
     if not _account_id:
-        _account_id = subprocess.check_output(
-            [
-                "aws",
-                "sts",
-                "get-caller-identity",
-                "--query",
-                "Account",
-                "--output",
-                "text",
-            ],
-            text=True,
-        ).strip()
+        _account_id = aws.get_caller_identity().account_id
 
     return _account_id
 
@@ -30,14 +19,11 @@ _region = None
 def region() -> str:
     global _region
     if not _region:
-        # Get the AWS region from the AWS CLI configuration
-        _region = subprocess.check_output(
-            ["aws", "configure", "get", "region"], text=True
-        ).strip()
+        _region = aws.get_region().name
     return _region
 
 
-def resource_id(name: str = None, separator: str = '-') -> str:
+def resource_id(name: str = None, separator: str = "-") -> str:
     """
     Generate a standardized resource ID by combining the project name, stack name,
     and resource name.

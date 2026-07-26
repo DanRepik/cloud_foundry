@@ -1,7 +1,6 @@
 # websocket_api.py
 
 import json
-import logging
 from typing import Optional, Union
 
 import pulumi
@@ -11,9 +10,9 @@ from cloud_foundry.pulumi.custom_domain import (
     CustomCertificate,
     domain_from_subdomain,
 )
+from cloud_foundry.utils.logger import logger
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
+log = logger(__name__)
 
 
 class WebSocketAPI(pulumi.ComponentResource):
@@ -343,7 +342,12 @@ class WebSocketAPI(pulumi.ComponentResource):
             source_arn=pulumi.Output.concat(
                 api.execution_arn,
                 "/",
-                self.stage.name if hasattr(self, "stage") else "*",
+                # The stage isn't created yet at this point (it's created
+                # after the API via a later .apply()), but _create_stage
+                # always names the stage after the current Pulumi stack,
+                # so that value can be used directly here.
+                pulumi.get_stack(),
+                "/*",
             ),
             opts=pulumi.ResourceOptions(parent=self),
         )

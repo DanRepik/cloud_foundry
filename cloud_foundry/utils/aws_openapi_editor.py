@@ -6,9 +6,6 @@ from typing import Union, Dict, List, Optional
 from cloud_foundry.utils.logger import logger
 from cloud_foundry.utils.openapi_editor import OpenAPISpecEditor
 import boto3
-import yaml
-import os
-import json
 
 log = logger(__name__)
 
@@ -35,7 +32,6 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
     def merge_spec_item(self, item):
         if isinstance(item, str):
             if item.startswith("s3://"):
-                temo = self._resolve_s3_item(item)
                 self.merge_spec_item(self._resolve_s3_item(item))
             elif item.startswith("pkg://"):
                 self.merge_spec_item(self._resolve_package_item(item))
@@ -226,10 +222,11 @@ class AWSOpenAPISpecEditor(OpenAPISpecEditor):
             summary = item.get("summary")
             description = item.get("description")
 
+            region = aws.get_region().name
             uri = (
-                f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{prefix}/{{proxy}}"
+                f"arn:aws:apigateway:{region}:s3:path/{bucket_name}/{prefix}/{{proxy}}"
                 if prefix
-                else f"arn:aws:apigateway:us-east-1:s3:path/{bucket_name}/{{proxy}}"
+                else f"arn:aws:apigateway:{region}:s3:path/{bucket_name}/{{proxy}}"
             )
 
             self.get_or_create_spec_part(["paths", f"{path}/{{proxy+}}"], create=True)[
