@@ -3,6 +3,7 @@ import hashlib
 import base64
 import json
 import os
+from typing import Optional
 import boto3
 from urllib.parse import unquote
 from botocore.exceptions import ClientError
@@ -193,9 +194,7 @@ class AuthorizationServices:
                 }
 
             new_password = body.get("new_password")
-            log.info(
-                f"Changing password for user: {username}, new_password: {new_password}"
-            )
+            log.info(f"Changing password for user: {username}")
 
             result = cognito_client.change_password(
                 PreviousPassword=old_password,
@@ -443,19 +442,18 @@ class AuthorizationServices:
         # No permissions found
         return []
 
-    def get_access_token(self, event) -> str:
+    def get_access_token(self, event) -> Optional[str]:
         """
-        Extracts the access token from the event.
+        Extracts the access token from the event. Returns None if the
+        Authorization header is missing, so callers' `if not access_token`
+        checks behave correctly.
         """
         headers = event.get("headers", {})
         authorization_header = headers.get("Authorization")
 
         if not authorization_header:
             log.error("Authorization header is missing")
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": "Authorization header is required"}),
-            }
+            return None
 
         return (
             authorization_header.split(" ")[1]
