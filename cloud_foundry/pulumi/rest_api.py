@@ -312,6 +312,7 @@ class RestAPI(pulumi.ComponentResource):
                 aws.s3.BucketObject(
                     key,
                     bucket=bucket_name,
+                    content=self.editor.yaml,
                     opts=pulumi.ResourceOptions(parent=self),
                 )
                 log.info("API specification exported to S3: %s", self.export_api)
