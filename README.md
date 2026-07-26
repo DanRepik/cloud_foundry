@@ -184,7 +184,7 @@ The complete REST API deployment looks like this:
 # __main__.py
 greet_api = cloud_foundry.rest_api(
     "greet-oauth-api",
-    body="./api_spec.yaml",
+    specification="./api_spec.yaml",
     integrations=[
         {
             "path": "/greet",
@@ -237,17 +237,18 @@ lambda_function = Function(
 ```python
 def __init__(
     self,
-    name: str,
+    name,
     *,
     archive_location: str = None,
     hash: str = None,
-    runtime: str = None,
-    handler: str = None,
-    timeout: int = None,
-    memory_size: int = None,
-    environment: dict[str, str] = None,
-    actions: list[str] = None,
-    vpc_config: dict = None,
+    runtime: Optional[str] = None,
+    handler: Optional[str] = None,
+    timeout: Optional[int] = None,
+    memory_size: Optional[int] = None,
+    architectures: Optional[list[str]] = None,
+    environment: dict[str, Union[str, pulumi.Output[str]]] = None,
+    policy_statements: Optional[PolicyStatementsInput] = None,
+    vpc_config: Optional[dict] = None,
     opts=None,
 )
 ```
@@ -268,9 +269,11 @@ def __init__(
 
 - `memory_size` (`int`, optional) – The amount of memory (in MB) allocated to the Lambda function. The default is 128 MB.
 
+- `architectures` (`list[str]`, optional) – The instruction set architecture(s) for the Lambda function (e.g., `["x86_64"]` or `["arm64"]`).
+
 - `environment` (`dict[str, str]`, optional) – Key-value pairs of environment variables to set for the Lambda function.
 
-- `actions` (`list[str]`, optional) – A list of additional IAM actions to be included in the Lambda function's execution role.
+- `policy_statements` (`list[dict]`, optional) – Additional IAM policy statements (each with `Effect`, `Action`/`Actions`, and `Resource`/`Resources` keys) to attach to the Lambda function's execution role.
 
 - `vpc_config` (`dict`, optional) – Configuration for the VPC settings of the Lambda function, such as:
   - `subnet_ids` (`list[str]`) – The list of subnet IDs for the VPC configuration.
@@ -292,7 +295,7 @@ The `function` helper method provides a simplified interface to create a new Lam
 
 ```python
 def function(
-    name: str,
+    name,
     *,
     archive_location: str = None,
     hash: str = None,
@@ -301,7 +304,7 @@ def function(
     timeout: int = None,
     memory_size: int = None,
     environment: dict[str, str] = None,
-    actions: list[str] = None,
+    policy_statements: list = None,
     vpc_config: dict = None,
     opts=None,
 ) -> Function:
@@ -417,199 +420,57 @@ lambda_function = cloud_foundry.python_function(
 
 ## `rest_api` (Helper Function)
 
-The `rest_api` function simplifies the creation and management of an AWS API Gateway REST API with Lambda integrations and authorizers. It allows you to define your API using an OpenAPI specification and attach Lambda functions to specific path operations. Additionally, it supports Lambda authorizers for authentication and authorization.
-
-### Example Usage
-
-```python
-import pulumi
-import cloud_foundry
-
-# Create the REST API
-greet_api = cloud_foundry.rest_api(
-  name="greet-api",
-  body="./api_spec.yaml",
-  integrations=[
-    {
-      "path": "/greet",
-      "method": "get",
-      "function": cloud_foundry.python_function(
-        name="greet-function",
-        handler="app.handler",
-        sources={"app.py": "./greet_app.py"},
-      ),
-    }
-  ],
-  authorizers=[
-    {
-      "name": "token-authorizer",
-      "type": "token",
-      "function": cloud_foundry.import_function("token-authorizer"),
-    }
-  ]
-)
-```
+The `rest_api` function creates and manages an AWS API Gateway REST API with Lambda integrations and token validators. Define your API using an OpenAPI specification and attach Lambda functions to specific path operations. Token validators (Lambda-backed or Cognito user-pool based) provide authentication and authorization.
 
 ### Function Signature
 
 ```python
-def rest_api(name, body, integrations=None, authorizers=None, opts=None)
+def rest_api(
+    name: str,
+    specification: Union[str, list[str]] = None,
+    integrations: list[dict] = None,
+    cors_origins: str = False,
+    token_validators: list[dict] = None,
+    content: list[dict] = None,
+    hosted_zone_id: str = None,
+    subdomain: str = None,
+    firewall: dict = None,
+    enable_logging: Optional[bool] = False,
+    path_prefix: Optional[str] = None,
+    export_api: Optional[str] = None,
+    opts: Optional[pulumi.ResourceOptions] = None,
+) -> RestAPI
 ```
 
 ### Parameters
 
 - `name` (str): The name of the REST API.
-- `body` (Union[str, list[str]]): The OpenAPI specification file path or the content of the OpenAPI spec. This can be a string representing a file path or YAML content.
-- `integrations` (Optional[list[dict]]): A list of Lambda function integrations for specific path operations in the API. Each integration is a dictionary containing:
+- `specification` (str or list[str]): The OpenAPI specification, as a file path or YAML content. A list merges multiple spec fragments together.
+- `integrations` (list[dict], optional): Lambda integrations for path operations. Each entry:
   - `path` (str): The API path to integrate with the Lambda function.
   - `method` (str): The HTTP method for the path.
-  - `function` (cloud_foundry.Function): The Lambda function to be integrated with the API path.
-- `authorizers` (Optional[list[dict]]): A list of Lambda authorizers used for authentication in the API. Each authorizer is a dictionary containing:
-  - `name` (str): The name of the authorizer.
-  - `type` (str): The type of authorizer (e.g., `token`).
-  - `function` (cloud_foundry.Function): The Lambda function used for the authorizer.
-- `opts` (Optional[pulumi.ResourceOptions]): Options to control the resource's behavior.
+  - `function` (cloud_foundry.Function): The Lambda function to integrate.
+- `cors_origins` (str or list[str], optional): If set, enables CORS on every path in the spec and allows the given origin(s).
+- `token_validators` (list[dict], optional): Authorizers for authentication. Each entry needs a unique `name` and exactly one of:
+  - `function` (cloud_foundry.Function): A Lambda-backed token validator, or
+  - `user_pools` (list[str]): Cognito user pool ARNs for a pool-based validator.
+- `content` (list[dict], optional): S3 content integrations (`bucket_name`, `path`, `prefix`, etc.) served directly through the API.
+- `hosted_zone_id` (str, optional): Route 53 hosted zone ID; when set, a custom domain is created for the API.
+- `subdomain` (str, optional): Subdomain to use for the custom domain (defaults to a name derived from `name`).
+- `firewall` (dict, optional): WAF configuration, forwarded to `RestAPIFirewall` (see `cloud_foundry.pulumi.api_waf`) — e.g. `{"block_sql_injection": True, "rate_limit": 2000}`. When set, a regional WAF Web ACL is created and attached to the API's stage.
+- `enable_logging` (bool, optional): Enable API Gateway stage access logging to CloudWatch.
+- `path_prefix` (str, optional): A prefix prepended to every path in the spec.
+- `export_api` (str, optional): Write the resolved OpenAPI spec to a local file path or an `s3://bucket/key` location.
+- `opts` (pulumi.ResourceOptions, optional): Options to control the resource's behavior.
+
+### Example Usage
 
 ```python
-# define the OpenAPI specification for the application
-api_spec = """
-openapi: 3.0.3
-info:
-  description: A simple API that returns a greeting message.
-  title: Greeting API
-  version: 1.0.0
-paths:
-  /greet:
-    get:
-      summary: Returns a greeting message.
-      description: |
-        This endpoint returns a greeting message. It accepts an optional
-        query parameter `name`. If `name` is not provided, it defaults to "World".
-      parameters:
-        - in: query
-          name: name
-          schema:
-            type: string
-          description: The name of the person to greet.
-          example: John
-         security:
-           - oauth_authorizer: []
-      responses:
-        200:
-          description: A greeting message.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    description: The greeting message.
-                    example: Hello, John!
-        400:
-          description: Bad Request - Invalid query parameter.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    description: A description of the error.
-                    example: Invalid query parameter
-"""
+import cloud_foundry
 
-rest_api = cloud_foundry.rest_api(
-  name="example-api",
-  body=api_spec,
-  integrations=[
-    {
-      "path": "/hello",
-      "method": "get",
-      "function": cloud_foundry.python_function(
-        name="hello-function",
-        handler="app.handler",
-        sources={"app.py": "./hello_app.py"},
-      ),
-    }
-  ],
-  authorizers=[
-    {
-      "name": "oauth-authorizer",
-      "type": "token",
-      "function": cloud_foundry.import_function("oauth-authorizer"),
-    }
-  ]
-)
-```
-
-```python
-rest_api = cloud_foundry.rest_api(
-  name="example-api",
-  body="./api_spec.yaml",
-  integrations=[
-    {
-      "path": "/hello",
-      "method": "get",
-      "function": cloud_foundry.python_function(
-        name="hello-function",
-        handler="app.handler",
-        sources={"app.py": "./hello_app.py"},
-      ),
-    }
-  ],
-  authorizers=[
-    {
-      "name": "oauth-authorizer",
-      "type": "token",
-      "function": cloud_foundry.import_function("oauth-authorizer"),
-    }
-  ]
-)
-```
-
-The `rest_api` function simplifies the creation of an API Gateway REST API by using the `RestAPI` component. It also automatically exports the API Gateway host and API ID.
-
-## Example Usage
-
-```python
-import pulumi
-from cloud_foundry.rest_api import rest_api
-
-# Define Lambda function integration for the "/greet" path
-integrations = [
-    {
-        "path": "/greet",
-        "method": "get",
-        "function": cloud_foundry.python_function(
-            name="greet-function",
-            handler="app.handler",
-            sources={"app.py": "./greet_app.py"},
-        ),
-    }
-]
-
-# Create the API Gateway REST API
-greet_api = rest_api(
+greet_api = cloud_foundry.rest_api(
     name="greet-api",
-    body="./api_spec.yaml",
-    integrations=integrations,
-)
-```
-
-## Parameters
-
-- `name` (str) - The name of the REST API.
-- `body` (str) - The OpenAPI specification file path. This can be a string or YAML content.
-- `integrations` (Optional[list[dict]]) - A list of Lambda function integrations for the API paths.
-- `authorizers` (Optional[list[dict]]) - A list of Lambda authorizers for the API.
-
-### Example
-
-```python
-greet_api = rest_api(
-    name="greet-api",
-    body="./api_spec.yaml",
+    specification="./api_spec.yaml",
     integrations=[
         {
             "path": "/greet",
@@ -621,13 +482,20 @@ greet_api = rest_api(
             ),
         }
     ],
+    token_validators=[
+        {
+            "name": "token-authorizer",
+            "function": cloud_foundry.import_function("token-authorizer"),
+        }
+    ],
 )
 ```
 
-## Outputs
+### Outputs
 
-- `name-id` (str) - The ID of the created API Gateway REST API.
-- `name-host` (str) - The host URL of the created API Gateway REST API.
+- `rest_api_id` (`pulumi.Output[str]`) – The ID of the created API Gateway REST API.
+- `stage_name` (`pulumi.Output[str]`) – The name of the deployed API Gateway stage.
+- `domain` (`pulumi.Output[str]`) – The host URL of the API (custom domain if `hosted_zone_id` is set, otherwise the default `execute-api` endpoint).
 
 # `document_repository` Function Documentation
 The `document_repository` function is a utility designed to create a centralized document repository. It enables clients and services to store, retrieve, and manage documents efficiently within an S3 bucket.
@@ -796,8 +664,18 @@ The `cdn` function is a utility for creating a Content Delivery Network (CDN) us
 #### **Function Signature**
 
 ```python
-def cdn(name: str, sites=None, apis=None, hosted_zone_id=None, site_domain_name=None, create_apex=False, root_uri=None, error_responses=None, whitelist_countries=None):
-    return CDN(name, CDNArgs(sites, apis, hosted_zone_id, site_domain_name, create_apex, root_uri, error_responses, whitelist_countries))
+def cdn(
+    name: str,
+    origins: list[dict],
+    hosted_zone_id: Optional[str] = None,
+    subdomain: Optional[str] = None,
+    site_domain_name: Optional[str] = None,
+    error_responses: Optional[list] = None,
+    create_apex: Optional[bool] = False,
+    root_uri: Optional[str] = None,
+    logging_bucket: Optional[str] = None,
+    opts: ResourceOptions = None,
+) -> CDN
 ```
 
 ---
@@ -808,32 +686,41 @@ def cdn(name: str, sites=None, apis=None, hosted_zone_id=None, site_domain_name=
    - The name of the CDN resource.
    - Used to name the CloudFront distribution, Route 53 records, and other associated resources.
 
-2. **`sites`** (list, optional):
-   - A list of static site configurations to be served by the CDN.
-   - Each site is defined as a dictionary with properties like `name` and `is_target_origin`.
+2. **`origins`** (list[dict], required):
+   - A unified list of origin configurations served by the CDN. Each entry is a dict with:
+     - `name` (str): Unique identifier for the origin.
+     - `bucket` (aws.s3.Bucket): An S3 bucket, for a static-site origin.
+     - `domain_name` (str): A custom domain name, for a domain-based API origin.
+     - `rest_api` (RestAPI or aws.apigateway.RestApi): A REST API origin.
+     - `path_pattern` (str, optional): Path pattern for the cache behavior (e.g., `"/api/*"`), used by API/domain origins.
+     - `origin_path` (str, optional): Path prefix on the origin.
+     - `origin_shield_region` (str, optional): AWS region for Origin Shield.
+     - `is_target_origin` (bool, optional): Marks this origin as the distribution's default origin.
+     - `api_key_password` (str, optional): API key sent as a custom header (REST API origins only).
 
-3. **`apis`** (list, optional):
-   - A list of API configurations to be served by the CDN.
-   - Each API is defined as a dictionary with properties like `name` and `rest_api`.
+3. **`hosted_zone_id`** (str, optional):
+   - The Route 53 hosted zone ID for managing DNS records. Required for a custom domain.
 
-4. **`hosted_zone_id`** (str, optional):
-   - The Route 53 hosted zone ID for managing DNS records.
+4. **`subdomain`** (str, optional):
+   - The subdomain for the CDN distribution (e.g., `"www"`, `"cdn"`). Defaults to the current Pulumi stack name.
 
 5. **`site_domain_name`** (str, optional):
-   - The domain name for the site (e.g., `example.com` or `www.example.com`).
+   - The base domain name, used when `create_apex` is set (e.g., `example.com`).
 
-6. **`create_apex`** (bool, optional):
-   - Whether to create an apex domain (e.g., `example.com`).
-   - Defaults to `False`.
-
-7. **`root_uri`** (str, optional):
-   - The default root object for the CDN (e.g., index.html).
-
-8. **`error_responses`** (list, optional):
+6. **`error_responses`** (list, optional):
    - Custom error responses for the CloudFront distribution.
 
-9. **`whitelist_countries`** (list, optional):
-   - A list of countries allowed to access the CDN.
+7. **`create_apex`** (bool, optional):
+   - Whether to create an apex domain A record (e.g., `example.com`).
+   - Defaults to `False`.
+
+8. **`root_uri`** (str, optional):
+   - The default root object for the CDN (e.g., `index.html`).
+
+9. **`logging_bucket`** (str, optional):
+   - An S3 bucket (e.g., `"my-logs.s3.amazonaws.com"`) to receive CloudFront access logs. Logging is disabled if omitted.
+
+> `whitelist_countries` and `blacklist_countries` (geo-restriction) are currently only available on the lower-level `CDNArgs`/`CDN` class, not the `cdn()` factory function shown above.
 
 ---
 
@@ -879,11 +766,9 @@ from cloud_foundry.pulumi.cdn import cdn
 
 cdn_instance = cdn(
     name="my-cdn",
-    sites=[
-        {"name": "static-site", "is_target_origin": True},
-    ],
-    apis=[
-        {"name": "my-api", "rest_api": my_api_gateway},
+    origins=[
+        {"name": "static-site", "bucket": site_bucket, "is_target_origin": True},
+        {"name": "my-api", "rest_api": my_api_gateway, "path_pattern": "/api/*"},
     ],
     hosted_zone_id="Z1234567890ABC",
     site_domain_name="example.com",
@@ -897,8 +782,8 @@ cdn_instance = cdn(
 ```python
 cdn_instance = cdn(
     name="static-cdn",
-    sites=[
-        {"name": "static-site", "is_target_origin": True},
+    origins=[
+        {"name": "static-site", "bucket": site_bucket, "is_target_origin": True},
     ],
     hosted_zone_id="Z1234567890ABC",
     site_domain_name="static.example.com",
@@ -907,15 +792,21 @@ cdn_instance = cdn(
 
 ##### **CDN with Geo-Restrictions**
 
+Geo-restriction (`whitelist_countries`) is only available via the lower-level `CDN`/`CDNArgs` classes:
+
 ```python
-cdn_instance = cdn(
-    name="geo-restricted-cdn",
-    sites=[
-        {"name": "restricted-site", "is_target_origin": True},
-    ],
-    hosted_zone_id="Z1234567890ABC",
-    site_domain_name="restricted.example.com",
-    whitelist_countries=["US", "CA", "GB"],
+from cloud_foundry.pulumi.cdn import CDN, CDNArgs
+
+cdn_instance = CDN(
+    "geo-restricted-cdn",
+    CDNArgs(
+        origins=[
+            {"name": "restricted-site", "bucket": site_bucket, "is_target_origin": True},
+        ],
+        hosted_zone_id="Z1234567890ABC",
+        site_domain_name="restricted.example.com",
+        whitelist_countries=["US", "CA", "GB"],
+    ),
 )
 ```
 
