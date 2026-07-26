@@ -401,9 +401,10 @@ class CDN(pulumi.ComponentResource):
 
             log.info(f"Configuring origin: {origin}")
             cdn_origin = None
+            origin_name = origin.get("name")
             if "bucket" in origin:
                 cdn_origin = SiteOrigin(
-                    f"{name}-{origin["name"]}",
+                    f"{name}-{origin_name}",
                     bucket=origin["bucket"],
                     origin_path=origin.get("origin_path"),
                     origin_shield_region=origin.get("origin_shield_region"),
@@ -413,7 +414,7 @@ class CDN(pulumi.ComponentResource):
 
             elif "domain_name" in origin:
                 cdn_origin = ApiOrigin(
-                    f"{name}-{origin["name"]}",
+                    f"{name}-{origin_name}",
                     domain_name=origin["domain_name"],
                     path_pattern=origin.get("path_pattern"),
                     origin_path=origin.get("origin_path"),
@@ -431,27 +432,27 @@ class CDN(pulumi.ComponentResource):
                     if not domain_name:
                         domain_name = rest_api.create_custom_domain(
                             self.hosted_zone_id,
-                            pulumi.Output.concat(origin["name"], "-", self.subdomain),
+                            pulumi.Output.concat(origin_name, "-", self.subdomain),
                         )
                 else:
                     if isinstance(rest_api, aws.apigateway.RestApi):
                         domain_name = self.setup_custom_domain(
-                            name=origin["name"],
+                            name=origin_name,
                             hosted_zone_id=self.hosted_zone_id,
                             domain_name=pulumi.Output.concat(
-                                origin["name"], "-", pulumi.get_stack()
+                                origin_name, "-", pulumi.get_stack()
                             ),
-                            stage_name=origin.rest_api.name,
-                            rest_api_id=origin.rest_api.id,
+                            stage_name=rest_api.name,
+                            rest_api_id=rest_api.id,
                         )
 
                 if domain_name is None:
                     raise ValueError(
-                        f"Could not resolve domain name for origin: {origin["name"]}"
+                        f"Could not resolve domain name for origin: {origin_name}"
                     )
 
                 cdn_origin = ApiOrigin(
-                    f"{name}-{origin["name"]}",
+                    f"{name}-{origin_name}",
                     domain_name=domain_name,
                     path_pattern=origin.get("path_pattern"),
                     origin_path=origin.get("origin_path"),
