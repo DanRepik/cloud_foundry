@@ -1,24 +1,4 @@
-
-pulumi
-pulumi-aws
-
-# testing packages
-docker
-pulumi-automation
-pytest
-pytest-cov
-requests
-boto3
-dotenv
-jwt
--e .
-
-# packaging packeges
-pre-commit
-flake8
-black
-build
-twine
-
-fixture_foundry
-psycopg2-binary
+# Development dependencies live in pyproject.toml's
+# [project.optional-dependencies].dev so that a single
+#   pip install -e .[dev]
+# is enough to run the full test suite, linters, and build tooling.

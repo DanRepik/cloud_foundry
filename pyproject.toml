@@ -34,6 +34,19 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.0.0",
     "flit>=3.9",
+    "pre-commit",
+    "flake8",
+    "build",
+    "twine",
+    # Needed by the real (non-mocked) test suite, which deploys against
+    # LocalStack via fixture_foundry.
+    "docker",
+    "pulumi-automation",
+    "requests",
+    "python-dotenv",
+    "pyjwt",
+    "fixture_foundry",
+    "psycopg2-binary",
 ]
 
 [tool.pytest.ini_options]
