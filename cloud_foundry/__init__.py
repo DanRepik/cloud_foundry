@@ -21,6 +21,7 @@ from cloud_foundry.pulumi.domain import domain  # noqa: F401
 
 from cloud_foundry.pulumi.queue import queue  # noqa: F401
 from cloud_foundry.pulumi.topic import topic  # noqa: F401
+from cloud_foundry.pulumi.idle_reaper import attach_idle_reaper  # noqa: F401
 
 from cloud_foundry.utils.names import resource_id  # noqa: F401
 

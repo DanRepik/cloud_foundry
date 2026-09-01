@@ -135,7 +135,7 @@ class Queue(ComponentResource):
         function: str | Function | aws.lambda_.Function,
         batch_size: Optional[int] = 10,
         maximum_concurrency: Optional[int] = None,
-    ) -> None:
+    ) -> aws.lambda_.EventSourceMapping:
         """Add SQS queue as Lambda event source.
 
         Args:
@@ -146,6 +146,9 @@ class Queue(ComponentResource):
                 1-10000 for FIFO queues.
             maximum_concurrency: Maximum number of concurrent Lambda function
                 invocations. Defaults to None (no limit). Valid values: 2-1000.
+
+        Returns:
+            aws.lambda_.EventSourceMapping: The created event source mapping.
         """
         # Extract function name based on type
         if isinstance(function, Function):
@@ -182,7 +185,7 @@ class Queue(ComponentResource):
                 )
             )
 
-        aws.lambda_.EventSourceMapping(
+        return aws.lambda_.EventSourceMapping(
             f"{resource_id(self.name)}-source",
             **mapping_args,
         )
