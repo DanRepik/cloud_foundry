@@ -1,3 +1,4 @@
+import asyncio
 import os
 import pytest
 
@@ -5,6 +6,20 @@ DEFAULT_IMAGE = "localstack/localstack:latest"
 DEFAULT_SERVICES = "logs,iam,lambda,secretsmanager,apigateway,cloudwatch,s3"
 
 os.environ["PULUMI_BACKEND_URL"] = "file://~"
+
+
+@pytest.fixture(autouse=True)
+def _ensure_event_loop():
+    # Python's asyncio stopped auto-creating a loop for the main thread when
+    # none is set (get_event_loop() now raises instead). pulumi.runtime
+    # .set_mocks() constructs an asyncio.Future() internally and expects one
+    # to already exist, so tests calling set_mocks() outside any async
+    # context need a loop pre-installed.
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    yield
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
