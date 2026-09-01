@@ -8,6 +8,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # cloud_foundry/services/authorization_api/security_lambda.py creates
+      # a boto3 cognito-idp client at import time, so pytest collection
+      # needs a region even for tests that never call AWS. Real Lambda
+      # deploys always have one set via the runtime environment already.
+      AWS_DEFAULT_REGION: us-east-1
 
     steps:
       - name: Checkout code
