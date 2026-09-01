@@ -50,7 +50,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
         """
         self.name = name
         self._sources = sources
-        self._requirements = requirements
+        self._requirements = requirements or []
         self._working_dir = working_dir
         self._target_architecture = self._normalize_architecture(target_architecture)
 
