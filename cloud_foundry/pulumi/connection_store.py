@@ -3,6 +3,7 @@
 import pulumi
 import pulumi_aws as aws
 from cloud_foundry.utils.logger import logger
+from cloud_foundry.utils.names import resource_id
 
 log = logger(__name__)
 
@@ -93,7 +94,7 @@ class ConnectionStore(pulumi.ComponentResource):
         """
         log.info("Creating connection store table: %s", self.name)
 
-        table_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
+        table_name = resource_id(self.name)
 
         # Define base attributes
         attributes = [

@@ -2,11 +2,13 @@ import pulumi
 import pulumi_aws as aws
 from pulumi import ResourceOptions
 from cloud_foundry.pulumi.ui_publisher import UIPublisher, UIPublisherArgs
+from cloud_foundry.utils.names import resource_id
 
 
 def default_bucket_name(name: str) -> str:
-    """Preserve the historical default S3 bucket naming scheme."""
-    return f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}"
+    """Default S3 bucket name, via resource_id() (project/stack prefixed,
+    honoring an opted-in project_slug)."""
+    return resource_id(name)
 
 
 def is_production_stack(stack_name: str | None = None) -> bool:

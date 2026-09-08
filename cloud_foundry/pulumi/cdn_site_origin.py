@@ -5,6 +5,7 @@ import pulumi_aws as aws
 from pulumi import ResourceOptions
 
 from cloud_foundry.pulumi.site_bucket import SiteBucket
+from cloud_foundry.utils.names import resource_id
 from cloud_foundry.utils.logger import logger
 
 log = logger(__name__)
@@ -90,7 +91,9 @@ class SiteOrigin(pulumi.ComponentResource):
             self.bucket = bucket
         elif isinstance(bucket, SiteBucket):
             self.bucket = bucket.bucket
-        elif hasattr(bucket, "bucket") and hasattr(bucket.bucket, "bucket_regional_domain_name"):
+        elif hasattr(bucket, "bucket") and hasattr(
+            bucket.bucket, "bucket_regional_domain_name"
+        ):
             self.bucket = bucket.bucket
         elif isinstance(bucket, str):
             self.bucket = aws.s3.BucketV2.get(bucket, bucket)
@@ -103,7 +106,7 @@ class SiteOrigin(pulumi.ComponentResource):
         # Create Origin Access Control
         origin_access_control = aws.cloudfront.OriginAccessControl(
             f"{name}-origin-access-control",
-            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}",
+            name=resource_id(name),
             origin_access_control_origin_type="s3",
             signing_behavior="always",
             signing_protocol="sigv4",

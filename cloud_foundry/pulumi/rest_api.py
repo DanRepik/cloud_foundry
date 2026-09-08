@@ -349,7 +349,7 @@ class RestAPI(pulumi.ComponentResource):
             log.info("Setting up logging for API stage")
             log_group = aws.cloudwatch.LogGroup(
                 f"{self.name}-log",
-                name=f"/aws/api/{pulumi.get_project()}/{pulumi.get_stack()}/{self.name}",  # noqa
+                name=f"/aws/api/{resource_id(self.name, separator='/')}",
                 retention_in_days=3,
                 opts=pulumi.ResourceOptions(parent=self, retain_on_delete=False),
             )

@@ -2,10 +2,10 @@
 import json
 from typing import Optional
 
-import pulumi
 from pulumi_aws import wafv2
 
 from cloud_foundry.utils.logger import logger
+from cloud_foundry.utils.names import resource_id
 
 log = logger(__name__)
 
@@ -159,7 +159,7 @@ class GatewayRestApiWAF:
             # Create an IP set for trusted IPs and allow traffic from those ranges.
             ip_set = wafv2.IpSet(
                 f"{name}-ip-set",
-                name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}-ip-set",
+                name=resource_id(f"{name}-ip-set"),
                 description="An IP Set for trusted IPs",
                 scope="CLOUDFRONT",  # Use 'REGIONAL' for regional WAF rules.
                 addresses=firewall.allowed_cidr_blocks,

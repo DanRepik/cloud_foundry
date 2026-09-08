@@ -3,6 +3,7 @@ import pulumi_aws as aws
 from typing import Optional
 from pulumi import ResourceOptions
 from cloud_foundry.utils.logger import logger
+from cloud_foundry.utils.names import resource_id
 
 log = logger(__name__)
 
@@ -87,7 +88,7 @@ class ApiOrigin(pulumi.ComponentResource):
         # Define a custom origin request policy
         aws.cloudfront.OriginRequestPolicy(
             f"{name}-request-policy",
-            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}-request-policy",
+            name=resource_id(f"{name}-request-policy"),
             cookies_config={
                 "cookie_behavior": "none",  # Do not forward cookies
             },

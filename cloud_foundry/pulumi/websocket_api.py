@@ -11,6 +11,7 @@ from cloud_foundry.pulumi.custom_domain import (
     domain_from_subdomain,
 )
 from cloud_foundry.utils.logger import logger
+from cloud_foundry.utils.names import resource_id
 
 log = logger(__name__)
 
@@ -213,7 +214,7 @@ class WebSocketAPI(pulumi.ComponentResource):
         # Create the WebSocket API
         api = aws.apigatewayv2.Api(
             f"{self.name}-api",
-            name=f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}",
+            name=resource_id(self.name),
             protocol_type="WEBSOCKET",
             route_selection_expression="$request.body.action",
             opts=pulumi.ResourceOptions(parent=self),

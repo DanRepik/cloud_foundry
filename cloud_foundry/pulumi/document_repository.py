@@ -3,6 +3,7 @@ from pulumi_aws import s3, lambda_, iam
 import json
 
 from cloud_foundry.utils.logger import logger
+from cloud_foundry.utils.names import resource_id
 
 log = logger(__name__)
 
@@ -11,9 +12,7 @@ class DocumentRepository(pulumi.ComponentResource):
     def __init__(self, name, bucket_name: str = None, notifications=None, opts=None):
         super().__init__("cloud_foundry:s3:DocumentBucket", name, {}, opts)
 
-        self.bucket_name = (
-            bucket_name or f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}"
-        )
+        self.bucket_name = bucket_name or resource_id(name)
 
         log.info(f"Creating S3 bucket: {self.bucket_name}")
 

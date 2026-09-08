@@ -109,6 +109,7 @@ from cloud_foundry.pulumi.custom_domain import (
 )
 from cloud_foundry.pulumi.rest_api import RestAPI
 from cloud_foundry.utils.logger import logger
+from cloud_foundry.utils.names import resource_id
 
 log = logger(__name__)
 
@@ -257,7 +258,7 @@ class CDN(pulumi.ComponentResource):
         origins, caches, target_origin_id = self.get_origins(name, args.origins)
         self.distribution = aws.cloudfront.Distribution(
             f"{name}-distro",
-            comment=f"{pulumi.get_project()}-{pulumi.get_stack()}-{name}",
+            comment=resource_id(name),
             enabled=True,
             is_ipv6_enabled=True,
             default_root_object=args.root_uri,
