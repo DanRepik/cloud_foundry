@@ -23,10 +23,38 @@ def region() -> str:
     return _region
 
 
+def project_slug() -> str:
+    """
+    Resolve the short name to use as the "project" component of generated
+    AWS resource names.
+
+    AWS resource names are frequently length-limited (SNS topics, IAM
+    roles, Lambda functions, DynamoDB tables, ...), so a Pulumi project
+    with a long `name:` in Pulumi.yaml can push `resource_id()`-generated
+    names past those limits, forcing names to be overridden by hand at
+    each call site.
+
+    Projects can opt into a shorter alias by setting the `project_slug`
+    config value, e.g.:
+
+        pulumi config set civarai-evidence:project_slug cep
+
+    Returns:
+        str: The configured project slug, or the full Pulumi project name
+            (`pulumi.get_project()`) if no slug has been configured.
+    """
+    slug = (pulumi.Config().get("project_slug") or "").strip()
+    return slug or pulumi.get_project()
+
+
 def resource_id(name: str = None, separator: str = "-") -> str:
     """
-    Generate a standardized resource ID by combining the project name, stack name,
-    and resource name.
+    Generate a standardized resource ID by combining the project slug, stack
+    name, and resource name.
+
+    The project component is `project_slug()` rather than the raw Pulumi
+    project name, so a project can configure a short alias (e.g. "cep")
+    to keep generated AWS names under service length limits.
 
     Args:
         name (str): The base name of the resource.
@@ -34,6 +62,6 @@ def resource_id(name: str = None, separator: str = "-") -> str:
     Returns:
         str: A standardized resource ID in the format "project-stack-resource".
     """
-    project = pulumi.get_project()
+    project = project_slug()
     stack = pulumi.get_stack()
     return f"{project}{separator}{stack}{separator + name if name else ''}"
