@@ -1,3 +1,5 @@
+import os
+
 import pulumi
 import pulumi_aws as aws
 
@@ -34,17 +36,34 @@ def project_slug() -> str:
     names past those limits, forcing names to be overridden by hand at
     each call site.
 
-    Projects can opt into a shorter alias by setting the `project_slug`
-    config value, e.g.:
+    Projects can opt into a shorter alias two ways, checked in this
+    order:
 
-        pulumi config set civarai-evidence:project_slug cep
+    1. The `CLOUD_FOUNDRY_PROJECT_SLUG` environment variable, e.g.:
+
+           export CLOUD_FOUNDRY_PROJECT_SLUG=cep
+
+       Useful for CI or a local shell override without touching checked-in
+       stack config.
+
+    2. The `project_slug` Pulumi config value, e.g.:
+
+           pulumi config set civarai-evidence:project_slug cep
+
+    If neither is set, falls back to the full Pulumi project name
+    (`pulumi.get_project()`) — existing behavior is unchanged unless a
+    project explicitly opts in.
 
     Returns:
         str: The configured project slug, or the full Pulumi project name
-            (`pulumi.get_project()`) if no slug has been configured.
+            if no slug has been configured.
     """
-    slug = (pulumi.Config().get("project_slug") or "").strip()
-    return slug or pulumi.get_project()
+    env_slug = (os.environ.get("CLOUD_FOUNDRY_PROJECT_SLUG") or "").strip()
+    if env_slug:
+        return env_slug
+
+    config_slug = (pulumi.Config().get("project_slug") or "").strip()
+    return config_slug or pulumi.get_project()
 
 
 def resource_id(name: str = None, separator: str = "-") -> str:
@@ -53,8 +72,10 @@ def resource_id(name: str = None, separator: str = "-") -> str:
     name, and resource name.
 
     The project component is `project_slug()` rather than the raw Pulumi
-    project name, so a project can configure a short alias (e.g. "cep")
-    to keep generated AWS names under service length limits.
+    project name, so a project can configure a short alias (e.g. "cep"),
+    via the `CLOUD_FOUNDRY_PROJECT_SLUG` environment variable or the
+    `project_slug` Pulumi config value, to keep generated AWS names under
+    service length limits.
 
     Args:
         name (str): The base name of the resource.
