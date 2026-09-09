@@ -77,3 +77,34 @@ def test_topic_name_output_differs_from_logical_name_attribute(mocks):
     _drain_pulumi_event_loop()
 
     assert captured["name"] == "cep-dev-ingestion-events"
+
+
+@pytest.mark.unit
+def test_default_name_tag_matches_deployed_name(mocks):
+    topic("ingestion-events")
+    _drain_pulumi_event_loop()
+
+    created = next(r for r in mocks.created if r.typ == "aws:sns/topic:Topic")
+    assert created.inputs["tags"] == {"Name": "cep-dev-ingestion-events"}
+
+
+@pytest.mark.unit
+def test_extra_tags_are_merged(mocks):
+    topic("ingestion-events", tags={"Environment": "prod", "Team": "cep"})
+    _drain_pulumi_event_loop()
+
+    created = next(r for r in mocks.created if r.typ == "aws:sns/topic:Topic")
+    assert created.inputs["tags"] == {
+        "Name": "cep-dev-ingestion-events",
+        "Environment": "prod",
+        "Team": "cep",
+    }
+
+
+@pytest.mark.unit
+def test_explicit_name_tag_overrides_default(mocks):
+    topic("ingestion-events", tags={"Name": "custom-name"})
+    _drain_pulumi_event_loop()
+
+    created = next(r for r in mocks.created if r.typ == "aws:sns/topic:Topic")
+    assert created.inputs["tags"] == {"Name": "custom-name"}

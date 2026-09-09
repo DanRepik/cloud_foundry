@@ -86,3 +86,45 @@ def test_receive_wait_time_defaults_to_short_polling(mocks):
     main = _find(mocks, "aws:sqs/queue:Queue", "ingestion-pipeline")
 
     assert main.inputs["receiveWaitTimeSeconds"] == 0
+
+
+@pytest.mark.unit
+def test_default_name_tag_matches_each_resources_own_name(mocks):
+    queue("ingestion-pipeline")
+    _drain_pulumi_event_loop()
+
+    dlq = _find(mocks, "aws:sqs/queue:Queue", "ingestion-pipeline-dlq")
+    main = _find(mocks, "aws:sqs/queue:Queue", "ingestion-pipeline")
+
+    assert dlq.inputs["tags"] == {"Name": "cep-dev-ingestion-pipeline-dlq"}
+    assert main.inputs["tags"] == {"Name": "cep-dev-ingestion-pipeline"}
+
+
+@pytest.mark.unit
+def test_extra_tags_are_merged_onto_both_queues(mocks):
+    queue("ingestion-pipeline", tags={"Environment": "prod", "Team": "cep"})
+    _drain_pulumi_event_loop()
+
+    dlq = _find(mocks, "aws:sqs/queue:Queue", "ingestion-pipeline-dlq")
+    main = _find(mocks, "aws:sqs/queue:Queue", "ingestion-pipeline")
+
+    assert dlq.inputs["tags"] == {
+        "Name": "cep-dev-ingestion-pipeline-dlq",
+        "Environment": "prod",
+        "Team": "cep",
+    }
+    assert main.inputs["tags"] == {
+        "Name": "cep-dev-ingestion-pipeline",
+        "Environment": "prod",
+        "Team": "cep",
+    }
+
+
+@pytest.mark.unit
+def test_explicit_name_tag_overrides_default(mocks):
+    queue("ingestion-pipeline", tags={"Name": "custom-name"})
+    _drain_pulumi_event_loop()
+
+    main = _find(mocks, "aws:sqs/queue:Queue", "ingestion-pipeline")
+
+    assert main.inputs["tags"] == {"Name": "custom-name"}

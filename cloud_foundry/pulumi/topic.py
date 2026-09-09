@@ -12,10 +12,14 @@ class TopicArgs:
     """Arguments for Topic component."""
 
     def __init__(
-        self, display_name: Optional[str], subscriptions: Optional[list[dict]] = None
+        self,
+        display_name: Optional[str],
+        subscriptions: Optional[list[dict]] = None,
+        tags: Optional[dict[str, str]] = None,
     ):
         self.display_name = display_name
         self.subscriptions = subscriptions
+        self.tags = tags or {}
 
 
 class Topic(ComponentResource):
@@ -44,10 +48,12 @@ class Topic(ComponentResource):
         super().__init__("cloud_foundry:topic:Topic", name, {}, opts)
 
         self.name = name
+        topic_name = resource_id(name)
         self.topic = aws.sns.Topic(
             name,
-            name=resource_id(name),
+            name=topic_name,
             display_name=args.display_name or name,
+            tags={"Name": topic_name, **args.tags},
             opts=ResourceOptions(parent=self),
         )
 
@@ -132,6 +138,7 @@ def topic(
     name: str,
     display_name: Optional[str] = None,
     subscriptions: Optional[list[dict]] = None,
+    tags: Optional[dict[str, str]] = None,
     opts: ResourceOptions = None,
 ) -> Topic:
     """Factory function to create a Topic component.
@@ -142,6 +149,10 @@ def topic(
         subscriptions (Optional[list[dict]]): List of subscription configs.
             Each config should be a dict with a 'queue' key for SQS queues.
             Defaults to None.
+        tags (Optional[dict[str, str]]): Extra tags applied to the topic,
+            alongside the "Name" tag it already gets set to its own
+            resource_id()-generated name. A "Name" key here overrides
+            that default.
         opts (ResourceOptions, optional): Pulumi resource options.
             Defaults to None.
     Returns:
@@ -150,9 +161,12 @@ def topic(
         >>> my_topic = topic(
         ...     name="my-topic",
         ...     display_name="My Topic",
-        ...     subscriptions=[{"queue": my_queue}]
+        ...     subscriptions=[{"queue": my_queue}],
+        ...     tags={"Environment": "prod"},
         ... )
     """
     return Topic(
-        name, TopicArgs(display_name=display_name, subscriptions=subscriptions), opts
+        name,
+        TopicArgs(display_name=display_name, subscriptions=subscriptions, tags=tags),
+        opts,
     )

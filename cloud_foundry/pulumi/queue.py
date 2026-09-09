@@ -40,12 +40,14 @@ class QueueArgs:
         visibility_timeout: Optional[int] = None,
         message_retention: Optional[int] = None,
         receive_wait_time: Optional[int] = None,
+        tags: Optional[dict[str, str]] = None,
     ) -> None:
         self.visibility_timeout = visibility_timeout or 300  # 5 minutes
         self.message_retention = message_retention or 345600  # 4 days
         # 0 (short polling) matches SQS's own default, so leaving this
         # unset is a no-op for existing callers.
         self.receive_wait_time = receive_wait_time or 0
+        self.tags = tags or {}
 
 
 class Queue(ComponentResource):
@@ -87,10 +89,12 @@ class Queue(ComponentResource):
         self.name = name
         """Create SQS queue with DLQ."""
         # Dead letter queue
+        dlq_name = f"{resource_id(self.name)}-dlq"
         self.dlq = aws.sqs.Queue(
             f"{name}-dlq",
-            name=f"{resource_id(self.name)}-dlq",
+            name=dlq_name,
             message_retention_seconds=1209600,  # 14 days
+            tags={"Name": dlq_name, **args.tags},
             opts=ResourceOptions(
                 parent=self,
                 ignore_changes=["region", "tagsAll"],
@@ -98,9 +102,10 @@ class Queue(ComponentResource):
         )
 
         # Main queue
+        queue_name = resource_id(self.name)
         self.queue = aws.sqs.Queue(
             name,
-            name=resource_id(self.name),
+            name=queue_name,
             visibility_timeout_seconds=args.visibility_timeout,
             message_retention_seconds=args.message_retention,
             receive_wait_time_seconds=args.receive_wait_time,
@@ -112,6 +117,7 @@ class Queue(ComponentResource):
                     }
                 )
             ),
+            tags={"Name": queue_name, **args.tags},
             opts=ResourceOptions(
                 parent=self,
                 ignore_changes=["region", "tagsAll"],
@@ -201,6 +207,7 @@ def queue(
     visibility_timeout: Optional[int] = None,
     message_retention: Optional[int] = None,
     receive_wait_time: Optional[int] = None,
+    tags: Optional[dict[str, str]] = None,
     opts: ResourceOptions = None,
 ) -> Queue:
     """Factory function to create a Queue component.
@@ -213,6 +220,10 @@ def queue(
         receive_wait_time (Optional[int]): Long-polling wait time in
             seconds for ReceiveMessage calls. Defaults to None (0, i.e.
             short polling -- SQS's own default).
+        tags (Optional[dict[str, str]]): Extra tags applied to both the
+            main queue and its DLQ, alongside the "Name" tag each already
+            gets set to its own resource_id()-generated name. A "Name" key
+            here overrides that default.
         opts (ResourceOptions, optional): Pulumi resource options.
             Defaults to None.
     Returns:
@@ -223,6 +234,7 @@ def queue(
         ...     visibility_timeout=300,
         ...     message_retention=345600,
         ...     receive_wait_time=20,
+        ...     tags={"Environment": "prod"},
         ... )
     """
     return Queue(
@@ -231,6 +243,7 @@ def queue(
             visibility_timeout=visibility_timeout,
             message_retention=message_retention,
             receive_wait_time=receive_wait_time,
+            tags=tags,
         ),
         opts,
     )
