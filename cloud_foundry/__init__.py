@@ -26,4 +26,4 @@ from cloud_foundry.pulumi.idle_reaper import attach_idle_reaper  # noqa: F401
 from cloud_foundry.utils.names import resource_id  # noqa: F401
 from cloud_foundry.utils.names import project_slug  # noqa: F401
 
-version = "0.2.1"
+version = "0.2.2"
