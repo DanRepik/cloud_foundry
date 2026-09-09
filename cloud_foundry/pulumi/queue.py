@@ -39,9 +39,13 @@ class QueueArgs:
         self,
         visibility_timeout: Optional[int] = None,
         message_retention: Optional[int] = None,
+        receive_wait_time: Optional[int] = None,
     ) -> None:
         self.visibility_timeout = visibility_timeout or 300  # 5 minutes
         self.message_retention = message_retention or 345600  # 4 days
+        # 0 (short polling) matches SQS's own default, so leaving this
+        # unset is a no-op for existing callers.
+        self.receive_wait_time = receive_wait_time or 0
 
 
 class Queue(ComponentResource):
@@ -99,6 +103,7 @@ class Queue(ComponentResource):
             name=resource_id(self.name),
             visibility_timeout_seconds=args.visibility_timeout,
             message_retention_seconds=args.message_retention,
+            receive_wait_time_seconds=args.receive_wait_time,
             redrive_policy=self.dlq.arn.apply(
                 lambda arn: json.dumps(
                     {
@@ -195,6 +200,7 @@ def queue(
     name: str,
     visibility_timeout: Optional[int] = None,
     message_retention: Optional[int] = None,
+    receive_wait_time: Optional[int] = None,
     opts: ResourceOptions = None,
 ) -> Queue:
     """Factory function to create a Queue component.
@@ -204,6 +210,9 @@ def queue(
             Defaults to None (300 seconds).
         message_retention (Optional[int]): Message retention period in
             seconds. Defaults to None (345600 seconds).
+        receive_wait_time (Optional[int]): Long-polling wait time in
+            seconds for ReceiveMessage calls. Defaults to None (0, i.e.
+            short polling -- SQS's own default).
         opts (ResourceOptions, optional): Pulumi resource options.
             Defaults to None.
     Returns:
@@ -212,13 +221,16 @@ def queue(
         >>> my_queue = queue(
         ...     name="my-message-queue",
         ...     visibility_timeout=300,
-        ...     message_retention=345600
+        ...     message_retention=345600,
+        ...     receive_wait_time=20,
         ... )
     """
     return Queue(
         name,
         QueueArgs(
-            visibility_timeout=visibility_timeout, message_retention=message_retention
+            visibility_timeout=visibility_timeout,
+            message_retention=message_retention,
+            receive_wait_time=receive_wait_time,
         ),
         opts,
     )

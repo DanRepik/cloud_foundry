@@ -69,6 +69,17 @@ class Topic(ComponentResource):
         """Get the ARN of the SNS topic."""
         return self.topic.arn
 
+    @property
+    def topic_name(self) -> Output[str]:
+        """Get the deployed AWS name of the SNS topic.
+
+        Named `topic_name` rather than `name` because `self.name` already
+        holds the logical component name (a plain str, used internally for
+        default display_name and subscription resource naming) -- reusing
+        `name` for this would shadow that with an Output[str] and break it.
+        """
+        return self.topic.name
+
     def subscribe(self, queue: Queue, opts: ResourceOptions = None) -> None:
         """Subscribe an SQS queue to this SNS topic.
         Args:
