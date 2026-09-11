@@ -4,8 +4,21 @@ civarai-evidence/infra/shared-foundation). Queue owners call
 `attach_idle_reaper` after subscribing their Lambda to their queue so the
 reaper auto-disables the event source mapping once the queue is fully
 drained -- avoiding empty-poll SQS request volume from a mapping nobody
-remembered to turn off. It never re-enables anything; that stays each app's
-own producer/ingestion script.
+remembered to turn off.
+
+Re-enabling is still each producer's own responsibility -- the reaper never
+does it on its own initiative -- but `attach_idle_reaper` now also wires an
+on-demand path for that: a second EventRule, scoped to this consumer's
+queue, that matches a custom "EnableMapping" event and re-enables the
+mapping unconditionally (no drain/depth check needed for that direction).
+Producers trigger it via `cloud_foundry.utils.idle_reaper_client.
+request_mapping_enable(queue_url)` -- see that module's docstring for the
+tradeoff between importing it from `cloud_foundry` (pulls in pulumi/
+pulumi-aws transitively, same as any other cloud_foundry import) versus
+inlining its few lines directly in a dependency-sensitive Lambda. Producers
+only ever need the queue URL they already have to know to call SendMessage
+in the first place; they never need the event source mapping's UUID or the
+reaper's function/role names.
 
 The reaper's function name and IAM role name are computed deterministically
 via cloud_foundry's own naming convention (see
@@ -48,9 +61,11 @@ def attach_idle_reaper(
     reaper_role_name: str,
     resource_prefix: str,
     interval_minutes: int = 10,
+    event_bus_name: str = "default",
     opts: Optional[ResourceOptions] = None,
 ) -> None:
-    """Schedule the shared idle-esm-reaper Lambda against one queue/mapping.
+    """Schedule the shared idle-esm-reaper Lambda against one queue/mapping,
+    and wire an on-demand re-enable path for the same mapping.
 
     Args:
         queue: The cloud_foundry Queue (or anything exposing `.arn`/`.url`)
@@ -65,6 +80,11 @@ def attach_idle_reaper(
         resource_prefix: Unique prefix for this consumer's Pulumi resource
             names, e.g. `resource_id("workflow")`.
         interval_minutes: How often the reaper checks this queue.
+        event_bus_name: EventBridge bus the on-demand enable rule listens
+            on. Must match the bus `idle_reaper_client.request_mapping_enable`
+            callers publish to -- both default to the account's "default"
+            bus, so this only needs to change if a consumer already uses a
+            dedicated custom bus.
         opts: Pulumi ResourceOptions (e.g. `parent=`) applied to every
             resource created here.
     """
@@ -136,5 +156,53 @@ def attach_idle_reaper(
         function=reaper_function_name,
         principal="events.amazonaws.com",
         source_arn=rule.arn,
+        opts=opts,
+    )
+
+    # On-demand enable path. Scoped to this consumer's own queue URL, so a
+    # request_mapping_enable() call from any producer only ever wakes the
+    # one EventRule whose queue_url it matches -- unmatched events are
+    # dropped by EventBridge, no coordination needed across consumers.
+    enable_rule = aws.cloudwatch.EventRule(
+        f"{resource_prefix}-idle-reaper-enable",
+        name=_aws_name(resource_prefix, "idle-reaper-enable", 64),
+        event_bus_name=event_bus_name,
+        event_pattern=queue.url.apply(
+            lambda queue_url: json.dumps(
+                {
+                    "source": ["cloud_foundry.idle_reaper"],
+                    "detail-type": ["EnableMapping"],
+                    "detail": {"queue_url": [queue_url]},
+                }
+            )
+        ),
+        opts=opts,
+    )
+
+    aws.cloudwatch.EventTarget(
+        f"{resource_prefix}-idle-reaper-enable-target",
+        target_id=_aws_name(resource_prefix, "idle-reaper-enable-tgt", 64),
+        rule=enable_rule.name,
+        event_bus_name=event_bus_name,
+        arn=reaper_arn,
+        input=event_source_mapping.id.apply(
+            lambda uuid: json.dumps(
+                {
+                    "action": "enable",
+                    "queue_name": resource_prefix,
+                    "event_source_mapping_uuid": uuid,
+                }
+            )
+        ),
+        opts=opts,
+    )
+
+    aws.lambda_.Permission(
+        f"{resource_prefix}-idle-reaper-enable-invoke",
+        statement_id=_aws_name(resource_prefix, "idle-reaper-enable-invoke", 100),
+        action="lambda:InvokeFunction",
+        function=reaper_function_name,
+        principal="events.amazonaws.com",
+        source_arn=enable_rule.arn,
         opts=opts,
     )
