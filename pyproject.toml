@@ -45,7 +45,12 @@ dev = [
     "requests",
     "python-dotenv",
     "pyjwt",
-    "fixture_foundry",
+    # TEMPORARY: pinned to a fix branch because published fixture_foundry
+    # (0.2.4) has stale calls into its own context.py API that crash
+    # test collection (see DanRepik/fixture_foundry#4). Revert to a plain
+    # "fixture_foundry" once that PR merges and a fixed version is
+    # published to PyPI.
+    "fixture_foundry @ git+https://github.com/DanRepik/fixture_foundry.git@fix/fixtures-stale-teardown-calls",
     "psycopg2-binary",
 ]
 
@@ -57,6 +62,12 @@ markers = [
     "unit: marks tests as unit tests that do not require a database",
     "integration: marks tests that operate on a real database",
 ]
+
+# Required for the temporary git-URL pin on fixture_foundry in the dev
+# extra above (revert together once that pin goes back to a plain PyPI
+# dependency).
+[tool.hatch.metadata]
+allow-direct-references = true
 
 # Hatch support for local dev flows (keeps flit for building)
 [tool.hatch.envs.default]
