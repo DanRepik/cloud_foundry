@@ -14,6 +14,49 @@ PolicyStatement: TypeAlias = dict[str, Any] | str
 PolicyStatements: TypeAlias = list[PolicyStatement]
 PolicyStatementsInput: TypeAlias = pulumi.Input[PolicyStatements]
 
+_artifacts_bucket: Optional[aws.s3.BucketV2] = None
+
+
+def _get_artifacts_bucket() -> aws.s3.BucketV2:
+    """Lazily create the S3 bucket Lambda deployment packages are staged
+    through, once per Pulumi program (project+stack), reused by every
+    Function in that program rather than one bucket per function.
+
+    Lambda's direct inline code upload (what this module used before) caps
+    the deployment package at ~50MB (the CreateFunction API's request-body
+    limit); S3-based upload raises that to 250MB unzipped. A function with
+    a moderately heavy dependency (e.g. a google-cloud-* client, which
+    bundles protobuf/grpcio/generated API surface) can exceed 50MB on its
+    own, so this is the default path for every function, not just large
+    ones -- avoids two code paths for a difference that only matters once
+    something is already too big to debug conveniently.
+    """
+    global _artifacts_bucket
+    if _artifacts_bucket is None:
+        bucket_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-lambda-artifacts"
+        _artifacts_bucket = aws.s3.BucketV2(
+            "lambda-artifacts",
+            bucket=bucket_name,
+            force_destroy=True,
+            tags={"Name": bucket_name},
+        )
+        aws.s3.BucketOwnershipControls(
+            "lambda-artifacts-ownership-controls",
+            bucket=_artifacts_bucket.id,
+            rule=aws.s3.BucketOwnershipControlsRuleArgs(
+                object_ownership="BucketOwnerEnforced",
+            ),
+        )
+        aws.s3.BucketPublicAccessBlock(
+            "lambda-artifacts-public-access-block",
+            bucket=_artifacts_bucket.id,
+            block_public_acls=True,
+            ignore_public_acls=True,
+            block_public_policy=True,
+            restrict_public_buckets=True,
+        )
+    return _artifacts_bucket
+
 
 class Function(pulumi.ComponentResource):
     lambda_: aws.lambda_.Function
@@ -143,9 +186,23 @@ class Function(pulumi.ComponentResource):
 
         log.info("Environment args type: %s", type(environment_args))
 
+        # Uploaded via S3 rather than passed inline (code=FileArchive(...))
+        # -- see _get_artifacts_bucket's docstring. Keyed by content hash so
+        # unchanged code across deploys reuses the same object instead of
+        # re-uploading, and each deployed version stays addressable by hash.
+        artifacts_bucket = _get_artifacts_bucket()
+        code_object = aws.s3.BucketObjectv2(
+            f"{self.name}-code",
+            bucket=artifacts_bucket.id,
+            key=f"{self.name}/{self.hash}.zip",
+            source=pulumi.FileAsset(self.archive_location),
+            opts=pulumi.ResourceOptions(parent=self),
+        )
+
         self.lambda_ = aws.lambda_.Function(
             f"{self.name}-function",
-            code=pulumi.FileArchive(self.archive_location),
+            s3_bucket=artifacts_bucket.bucket,
+            s3_key=code_object.key,
             name=self.function_name,
             role=execution_role.arn,
             memory_size=self.memory_size,
@@ -157,7 +214,7 @@ class Function(pulumi.ComponentResource):
             environment=environment_args,
             vpc_config=vpc_config_args,
             opts=pulumi.ResourceOptions(
-                depends_on=[execution_role, log_group], parent=self
+                depends_on=[execution_role, log_group, code_object], parent=self
             ),
         )
 
