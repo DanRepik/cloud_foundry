@@ -165,6 +165,21 @@ class Function(pulumi.ComponentResource):
             # Explicit opt-in: upload via S3 instead of passing the zip
             # inline. Keyed by content hash so unchanged code across
             # deploys reuses the same object instead of re-uploading.
+            #
+            # hash is required here (unlike the inline path below, which
+            # doesn't need it): without a real value, the key degrades to
+            # "name/None.zip" -- every version collides on the same S3
+            # object, and source_code_hash=None below means Pulumi's own
+            # diff sees no change between deploys either, so a later code
+            # change wouldn't even trigger a Lambda update.
+            if not self.hash:
+                raise ValueError(
+                    f"Function '{self.name}': code_bucket requires hash= "
+                    f"(used for both the S3 object key and Lambda change "
+                    f"detection). python_function() always supplies this; "
+                    f"only the lower-level Function()/function() API can "
+                    f"omit it."
+                )
             bucket_name = _code_bucket_name(self.code_bucket)
             code_object = aws.s3.BucketObjectv2(
                 f"{self.name}-code",

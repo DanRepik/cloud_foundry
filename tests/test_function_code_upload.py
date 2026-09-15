@@ -122,3 +122,23 @@ def test_oversized_archive_with_code_bucket_uploads_via_s3(tmp_path):
         c for c in mocks.created if c.typ == "aws:s3/bucketObjectv2:BucketObjectv2"
     ]
     assert code_object_call.inputs["bucket"] == "my-artifacts-bucket"
+
+
+@pytest.mark.unit
+def test_code_bucket_without_hash_raises_clear_error(tmp_path):
+    # Without a real hash, the S3 key would degrade to "name/None.zip" --
+    # every version would collide on the same object, and
+    # source_code_hash=None would mean Pulumi's own diff never detects a
+    # later code change either.
+    mocks = RecordingMocks()
+    pulumi.runtime.set_mocks(mocks, preview=False)
+
+    archive = _make_archive(tmp_path, 1024)
+    with pytest.raises(ValueError, match="hash"):
+        Function(
+            "no-hash-fn",
+            archive_location=archive,
+            runtime="python3.12",
+            handler="app.handler",
+            code_bucket="my-artifacts-bucket",
+        )
