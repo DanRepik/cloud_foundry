@@ -1,4 +1,5 @@
 # function.py
+import os
 import platform
 from typing import Any, Optional, TypeAlias, Union
 
@@ -14,48 +15,19 @@ PolicyStatement: TypeAlias = dict[str, Any] | str
 PolicyStatements: TypeAlias = list[PolicyStatement]
 PolicyStatementsInput: TypeAlias = pulumi.Input[PolicyStatements]
 
-_artifacts_bucket: Optional[aws.s3.BucketV2] = None
+# AWS's documented cap for Lambda's direct/inline code upload (the
+# CreateFunction/UpdateFunctionCode API's request-body limit for a
+# base64-encoded zip passed as `code=`). S3-based upload (code_bucket=)
+# raises this to 250MB unzipped.
+DIRECT_UPLOAD_SIZE_LIMIT = 50 * 1024 * 1024
+
+CodeBucketInput = Union[str, pulumi.Output[str], "aws.s3.BucketV2", "aws.s3.Bucket"]
 
 
-def _get_artifacts_bucket() -> aws.s3.BucketV2:
-    """Lazily create the S3 bucket Lambda deployment packages are staged
-    through, once per Pulumi program (project+stack), reused by every
-    Function in that program rather than one bucket per function.
-
-    Lambda's direct inline code upload (what this module used before) caps
-    the deployment package at ~50MB (the CreateFunction API's request-body
-    limit); S3-based upload raises that to 250MB unzipped. A function with
-    a moderately heavy dependency (e.g. a google-cloud-* client, which
-    bundles protobuf/grpcio/generated API surface) can exceed 50MB on its
-    own, so this is the default path for every function, not just large
-    ones -- avoids two code paths for a difference that only matters once
-    something is already too big to debug conveniently.
-    """
-    global _artifacts_bucket
-    if _artifacts_bucket is None:
-        bucket_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-lambda-artifacts"
-        _artifacts_bucket = aws.s3.BucketV2(
-            "lambda-artifacts",
-            bucket=bucket_name,
-            force_destroy=True,
-            tags={"Name": bucket_name},
-        )
-        aws.s3.BucketOwnershipControls(
-            "lambda-artifacts-ownership-controls",
-            bucket=_artifacts_bucket.id,
-            rule=aws.s3.BucketOwnershipControlsRuleArgs(
-                object_ownership="BucketOwnerEnforced",
-            ),
-        )
-        aws.s3.BucketPublicAccessBlock(
-            "lambda-artifacts-public-access-block",
-            bucket=_artifacts_bucket.id,
-            block_public_acls=True,
-            ignore_public_acls=True,
-            block_public_policy=True,
-            restrict_public_buckets=True,
-        )
-    return _artifacts_bucket
+def _code_bucket_name(bucket: CodeBucketInput) -> pulumi.Input[str]:
+    if isinstance(bucket, (aws.s3.BucketV2, aws.s3.Bucket)):
+        return bucket.bucket
+    return bucket
 
 
 class Function(pulumi.ComponentResource):
@@ -75,6 +47,7 @@ class Function(pulumi.ComponentResource):
         environment: dict[str, Union[str, pulumi.Output[str]]] = None,
         policy_statements: Optional[PolicyStatementsInput] = None,
         vpc_config: Optional[dict] = None,
+        code_bucket: Optional[CodeBucketInput] = None,
         opts=None,
     ):
         super().__init__("cloud_foundry:lambda:Function", name, {}, opts)
@@ -90,6 +63,7 @@ class Function(pulumi.ComponentResource):
         self.timeout = timeout
         self.policy_statements = policy_statements or []
         self.vpc_config = vpc_config or {}
+        self.code_bucket = code_bucket
         self.function_name = f"{pulumi.get_project()}-{pulumi.get_stack()}-{self.name}"
         self.log_group_name = f"/aws/lambda/{self.function_name}"
         # Validate that the environment is a dictionary with string
@@ -186,23 +160,46 @@ class Function(pulumi.ComponentResource):
 
         log.info("Environment args type: %s", type(environment_args))
 
-        # Uploaded via S3 rather than passed inline (code=FileArchive(...))
-        # -- see _get_artifacts_bucket's docstring. Keyed by content hash so
-        # unchanged code across deploys reuses the same object instead of
-        # re-uploading, and each deployed version stays addressable by hash.
-        artifacts_bucket = _get_artifacts_bucket()
-        code_object = aws.s3.BucketObjectv2(
-            f"{self.name}-code",
-            bucket=artifacts_bucket.id,
-            key=f"{self.name}/{self.hash}.zip",
-            source=pulumi.FileAsset(self.archive_location),
-            opts=pulumi.ResourceOptions(parent=self),
-        )
+        code_depends_on = []
+        if self.code_bucket is not None:
+            # Explicit opt-in: upload via S3 instead of passing the zip
+            # inline. Keyed by content hash so unchanged code across
+            # deploys reuses the same object instead of re-uploading.
+            bucket_name = _code_bucket_name(self.code_bucket)
+            code_object = aws.s3.BucketObjectv2(
+                f"{self.name}-code",
+                bucket=bucket_name,
+                key=f"{self.name}/{self.hash}.zip",
+                source=pulumi.FileAsset(self.archive_location),
+                opts=pulumi.ResourceOptions(parent=self),
+            )
+            code_args = {"s3_bucket": bucket_name, "s3_key": code_object.key}
+            code_depends_on = [code_object]
+        else:
+            # Pulumi resource creation is async (the actual CreateFunction
+            # call happens in the provider plugin during apply, not
+            # synchronously here), so AWS's RequestEntityTooLargeException
+            # can't be caught with a plain try/except around the resource
+            # declaration below -- check the size ourselves first instead,
+            # for the same practical effect: a clear error at plan time
+            # instead of a cryptic one after an apply attempt.
+            archive_size = os.path.getsize(self.archive_location)
+            if archive_size > DIRECT_UPLOAD_SIZE_LIMIT:
+                raise ValueError(
+                    f"Lambda deployment package for '{self.name}' is "
+                    f"{archive_size / (1024 * 1024):.1f}MB, over AWS's "
+                    f"~50MB limit for direct/inline upload (the "
+                    f"CreateFunction API's request-body cap). Pass "
+                    f"code_bucket=<an aws.s3.BucketV2/Bucket or bucket "
+                    f"name> to python_function()/Function() to upload it "
+                    f"via S3 instead, which supports packages up to "
+                    f"250MB unzipped."
+                )
+            code_args = {"code": pulumi.FileArchive(self.archive_location)}
 
         self.lambda_ = aws.lambda_.Function(
             f"{self.name}-function",
-            s3_bucket=artifacts_bucket.bucket,
-            s3_key=code_object.key,
+            **code_args,
             name=self.function_name,
             role=execution_role.arn,
             memory_size=self.memory_size,
@@ -214,7 +211,8 @@ class Function(pulumi.ComponentResource):
             environment=environment_args,
             vpc_config=vpc_config_args,
             opts=pulumi.ResourceOptions(
-                depends_on=[execution_role, log_group, code_object], parent=self
+                depends_on=[execution_role, log_group] + code_depends_on,
+                parent=self,
             ),
         )
 
@@ -408,6 +406,7 @@ def function(
     environment: dict[str, str] = None,
     policy_statements: list = None,
     vpc_config: dict = None,
+    code_bucket: Optional[CodeBucketInput] = None,
     opts=None,
 ) -> Function:
     """
@@ -427,6 +426,12 @@ def function(
         policy_statements (list): IAM policy statements for the
             Lambda function.
         vpc_config (dict): VPC configuration for the Lambda function.
+        code_bucket: An aws.s3.BucketV2/Bucket or bucket name to upload the
+            code archive through instead of passing it inline. Required if
+            the archive exceeds AWS's ~50MB direct-upload limit -- omitting
+            it in that case raises a ValueError explaining this parameter,
+            rather than letting the deploy fail on AWS's own cryptic
+            RequestEntityTooLargeException.
         opts: Pulumi resource options.
 
     Returns:
@@ -443,6 +448,7 @@ def function(
         environment=environment,
         policy_statements=policy_statements,
         vpc_config=vpc_config,
+        code_bucket=code_bucket,
         opts=opts,
     )
 
