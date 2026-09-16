@@ -2,10 +2,21 @@ import asyncio
 import os
 import pytest
 
-DEFAULT_IMAGE = "localstack/localstack:latest"
+# Pinned rather than :latest: LocalStack moved to a unified image in March
+# 2026 (see https://localstack.cloud/2026-updates) that requires a Pro
+# license/LOCALSTACK_AUTH_TOKEN even for these Community-tier services,
+# causing every LocalStack-backed test to fail with "License activation
+# failed" in CI. 4.14.0 (2026-02-26) is the last release before that
+# change and needs no token -- verified locally: all of DEFAULT_SERVICES
+# below come up as "available" under "edition": "community".
+DEFAULT_IMAGE = "localstack/localstack:4.14.0"
 DEFAULT_SERVICES = "logs,iam,lambda,secretsmanager,apigateway,cloudwatch,s3"
 
 os.environ["PULUMI_BACKEND_URL"] = "file://~"
+# The local file backend's secrets manager requires a passphrase; these are
+# ephemeral, disposable test stacks with no real secrets to protect, so an
+# empty one is fine. Without this, stack creation fails outright.
+os.environ.setdefault("PULUMI_CONFIG_PASSPHRASE", "")
 
 
 @pytest.fixture(autouse=True)

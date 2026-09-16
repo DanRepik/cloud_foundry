@@ -6,6 +6,7 @@ from cloud_foundry.utils.logger import logger
 
 from cloud_foundry.python_archive_builder import PythonArchiveBuilder
 from cloud_foundry.pulumi.function import (
+    CodeBucketInput,
     Function,
     PolicyStatementsInput,
     default_lambda_architecture,
@@ -27,6 +28,7 @@ def python_function(
     vpc_config: Optional[dict] = None,
     runtime: Optional[str] = None,
     architecture: Optional[str] = None,
+    code_bucket: Optional[CodeBucketInput] = None,
     opts=None,
 ) -> Function:
     resolved_architecture = architecture or default_lambda_architecture()
@@ -49,5 +51,6 @@ def python_function(
         vpc_config=vpc_config,
         runtime=runtime,
         architectures=[resolved_architecture],
+        code_bucket=code_bucket,
         opts=opts,
     )

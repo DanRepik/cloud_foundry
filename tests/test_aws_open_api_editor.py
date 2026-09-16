@@ -10,7 +10,11 @@ import pulumi_aws as aws
 from cloud_foundry.utils.aws_openapi_editor import AWSOpenAPISpecEditor
 from cloud_foundry import site_bucket
 
-from fixture_foundry import deploy, localstack, container_network
+from fixture_foundry import (  # noqa: F401 -- localstack/container_network are pytest fixtures, discovered by name
+    deploy,
+    localstack,
+    container_network,
+)
 
 
 def simple_hello_spec():
@@ -45,7 +49,9 @@ def simple_hello_spec():
 
 # Ensure boto3 inside AWSOpenAPISpecEditor talks to LocalStack
 @pytest.fixture(autouse=True)
-def boto3_uses_localstack(monkeypatch, localstack):
+def boto3_uses_localstack(
+    monkeypatch, localstack  # noqa: F811 -- pytest fixture param shadows the import
+):
     # Prefer service-specific endpoint var if supported; fall back to global
     monkeypatch.setenv("AWS_S3_ENDPOINT_URL", localstack["endpoint_url"])
     # botocore >= 1.31 supports AWS_ENDPOINT_URL
@@ -130,21 +136,22 @@ def s3_deployment():
 
 
 @pytest.fixture(scope="module")
-def simple_s3_stack(request, localstack):
-
-    teardown = request.config.getoption("--teardown").lower() == "true"
+def simple_s3_stack(
+    request, localstack  # noqa: F811 -- pytest fixture param shadows the import
+):
+    # deploy() always tears down on exit now (no teardown-skip option) --
+    # see fixture_foundry's context.py.
     with deploy(
         "cf-test",
         "simple-s3",
         s3_deployment(),
         localstack=localstack,
-        teardown=teardown,
     ) as outputs:
         yield outputs
 
 
 @pytest.fixture
-def s3_client(localstack):
+def s3_client(localstack):  # noqa: F811 -- pytest fixture param shadows the import
     return boto3.client(
         "s3",
         region_name=localstack["region"],
