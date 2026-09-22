@@ -1,7 +1,11 @@
 # src/pyproject.toml
 
 [build-system]
-requires = ["hatchling>=1.0"]
+# hatchling>=1.32.0 emits Metadata-Version: 2.5, which PyPI's Warehouse
+# rejects outright with a 400 on every upload regardless of package
+# version -- see https://github.com/pypi/warehouse/issues/19083 (open,
+# unresolved). Pinned below that until Warehouse adds 2.5 support.
+requires = ["hatchling>=1.0,<1.32.0"]
 build-backend = "hatchling.build"
 
 [project]

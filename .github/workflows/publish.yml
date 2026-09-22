@@ -1,0 +1,90 @@
+name: publish
+
+# Builds and publishes cloud-foundry to PyPI when a GitHub Release is
+# published. Versioning is NOT tag-derived: cloud_foundry/__init__.py's
+# `version = "x.y.z"` is the source of truth (read via [tool.hatch.version]
+# in pyproject.toml), so the check below fails fast if the release tag
+# doesn't match it -- PyPI rejects a re-upload of an already-published
+# version, and that mismatch is an easy thing to forget by hand.
+#
+# Tag releases as vX.Y.Z (e.g. v0.2.5) to match a version = "0.2.5" in
+# cloud_foundry/__init__.py.
+#
+# Publishing uses PyPI Trusted Publishing (OIDC) -- no PyPI token is
+# stored anywhere. One-time setup: on the cloud-foundry project's PyPI
+# page, Settings > Publishing > add a GitHub trusted publisher for
+# owner=DanRepik, repo=cloud_foundry, workflow=publish.yml,
+# environment=pypi.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # cloud_foundry/services/authorization_api/security_lambda.py builds
+      # a boto3 cognito-idp client at import time -- see pytest.yml.
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e .[dev]
+      - run: pytest tests
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Check release tag matches package version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg_version="$(python -c "import re; print(re.search(r'version\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]', open('cloud_foundry/__init__.py').read()).group(1))")"
+          if [ "$tag" != "$pkg_version" ]; then
+            echo "::error::Release tag '${GITHUB_REF_NAME}' does not match cloud_foundry/__init__.py version '${pkg_version}'. Bump the version in cloud_foundry/__init__.py and re-tag before publishing."
+            exit 1
+          fi
+
+      # python -m build, not flit -- the declared [build-system] backend
+      # is hatchling, which understands [tool.hatch.version]. flit's own
+      # dynamic-version detection only recognizes a literal __version__
+      # attribute via AST parsing and doesn't know about hatchling's
+      # regex-based version source, so building/publishing with flit
+      # against a hatchling-configured project is a mismatch worth
+      # avoiding entirely rather than working around.
+      - name: Install build backend
+        run: python -m pip install --upgrade pip build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
