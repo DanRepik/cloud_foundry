@@ -27,4 +27,4 @@ from cloud_foundry.utils.idle_reaper_client import request_mapping_enable  # noq
 from cloud_foundry.utils.names import resource_id  # noqa: F401
 from cloud_foundry.utils.names import project_slug  # noqa: F401
 
-version = "0.2.4"
+version = "0.3.0"
