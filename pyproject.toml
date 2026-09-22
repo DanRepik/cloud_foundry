@@ -49,14 +49,21 @@ dev = [
     "requests",
     "python-dotenv",
     "pyjwt",
-    # TEMPORARY: pinned to a fix branch because published fixture_foundry
-    # (0.2.4) has stale calls into its own context.py API that crash
-    # test collection (see DanRepik/fixture_foundry#4). Revert to a plain
-    # "fixture_foundry" once that PR merges and a fixed version is
-    # published to PyPI.
-    "fixture_foundry @ git+https://github.com/DanRepik/fixture_foundry.git@fix/fixtures-stale-teardown-calls",
     "psycopg2-binary",
 ]
+
+# fixture_foundry is NOT listed above on purpose. PyPI's upload API rejects
+# any package whose metadata declares a direct URL/VCS dependency, even one
+# scoped to an optional extra -- so a git-pinned entry here would block
+# every future `cloud-foundry` publish, not just fail quietly. Published
+# fixture_foundry (still 0.2.4 as of this pin) has stale calls into its own
+# context.py API that crash test collection (see DanRepik/fixture_foundry#4,
+# fixed on branch fix/fixtures-stale-teardown-calls but not yet released).
+# Install it separately before running the integration test suite:
+#   pip install git+https://github.com/DanRepik/fixture_foundry.git@fix/fixtures-stale-teardown-calls
+# CI does this as its own step -- see .github/workflows/pytest.yml and
+# publish.yml. Once a fixed version is published to PyPI, add a plain
+# "fixture_foundry>=X.Y.Z" back to the dev extra above and drop this note.
 
 [tool.pytest.ini_options]
 pythonpath = [".."]
@@ -66,12 +73,6 @@ markers = [
     "unit: marks tests as unit tests that do not require a database",
     "integration: marks tests that operate on a real database",
 ]
-
-# Required for the temporary git-URL pin on fixture_foundry in the dev
-# extra above (revert together once that pin goes back to a plain PyPI
-# dependency).
-[tool.hatch.metadata]
-allow-direct-references = true
 
 # Hatch support for local dev flows (keeps flit for building)
 [tool.hatch.envs.default]

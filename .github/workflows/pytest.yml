@@ -32,6 +32,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .[dev]
+          # Not in the dev extra -- see the note above it in pyproject.toml:
+          # a git-pinned dependency there would break every PyPI publish.
+          pip install git+https://github.com/DanRepik/fixture_foundry.git@fix/fixtures-stale-teardown-calls
 
       - name: Run pytest
         run: pytest tests
