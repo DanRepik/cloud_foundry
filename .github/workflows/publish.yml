@@ -37,6 +37,10 @@ jobs:
           python-version: "3.x"
       - run: python -m pip install --upgrade pip
       - run: pip install -e .[dev]
+      # Not in the dev extra -- see the note above it in pyproject.toml:
+      # a git-pinned dependency there would make every publish fail the
+      # same way this workflow exists to prevent.
+      - run: pip install git+https://github.com/DanRepik/fixture_foundry.git@fix/fixtures-stale-teardown-calls
       - run: pytest tests
 
   build:
