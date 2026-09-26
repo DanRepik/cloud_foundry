@@ -1,3 +1,7 @@
+import os
+import time
+import zipfile
+
 import pytest
 from cloud_foundry.python_archive_builder import PythonArchiveBuilder
 from unittest import mock
@@ -148,3 +152,86 @@ def test_requirements_none_does_not_raise(tmp_path):
         )
 
     assert builder.hash()
+
+
+def _fake_install(pyc_body: bytes):
+    """Stand-in for pip: installs one module plus the kind of bytecode pip
+    compiles by default, whose bytes differ from one install to the next."""
+
+    def install(self):
+        pkg = os.path.join(self._libs, "fakepkg")
+        os.makedirs(os.path.join(pkg, "__pycache__"), exist_ok=True)
+        with open(os.path.join(pkg, "__init__.py"), "w") as f:
+            f.write("VALUE = 1\n")
+        with open(os.path.join(pkg, "__pycache__", "__init__.cpython-311.pyc"), "wb") as f:
+            f.write(pyc_body)
+
+    return install
+
+
+def _build(working_dir, pyc_body: bytes) -> PythonArchiveBuilder:
+    with mock.patch.object(
+        PythonArchiveBuilder, "install_requirements", _fake_install(pyc_body)
+    ):
+        return PythonArchiveBuilder(
+            name="test",
+            sources={"handler.py": "def handler(event, context):\n    return event"},
+            requirements=["fakepkg==1.0"],
+            working_dir=str(working_dir),
+        )
+
+
+def _zip_bytes(builder: PythonArchiveBuilder) -> bytes:
+    with open(builder.location(), "rb") as f:
+        return f.read()
+
+
+def test_fresh_builds_of_the_same_tree_are_byte_identical(tmp_path):
+    # Two builds in separate working dirs (a CI runner starts with an empty
+    # temp/), seconds apart, with bytecode that differs between installs.
+    first = _build(tmp_path / "a", b"pyc-first-install")
+    time.sleep(1.1)  # zip timestamps have 2-second resolution; cross a tick
+    second = _build(tmp_path / "b", b"pyc-second-install")
+
+    assert first.hash() == second.hash()
+    assert _zip_bytes(first) == _zip_bytes(second)
+
+
+def test_archive_leaves_out_bytecode_and_keeps_sources(tmp_path):
+    builder = _build(tmp_path, b"pyc")
+
+    with zipfile.ZipFile(builder.location()) as archive:
+        names = archive.namelist()
+        infos = archive.infolist()
+
+    assert "handler.py" in names
+    assert "fakepkg/__init__.py" in names
+    assert not [n for n in names if "__pycache__" in n or n.endswith(".pyc")]
+    assert {info.date_time for info in infos} == {(1980, 1, 1, 0, 0, 0)}
+
+
+def test_source_change_still_changes_the_hash(tmp_path):
+    base = _build(tmp_path / "a", b"pyc")
+    with mock.patch.object(PythonArchiveBuilder, "install_requirements", _fake_install(b"pyc")):
+        changed = PythonArchiveBuilder(
+            name="test",
+            sources={"handler.py": "def handler(event, context):\n    return None"},
+            requirements=["fakepkg==1.0"],
+            working_dir=str(tmp_path / "b"),
+        )
+
+    assert base.hash() != changed.hash()
+    assert _zip_bytes(base) != _zip_bytes(changed)
+
+
+def test_pip_is_told_not_to_compile_bytecode(tmp_path):
+    with mock.patch("cloud_foundry.python_archive_builder.subprocess.check_call") as check_call:
+        PythonArchiveBuilder(
+            name="test",
+            sources={"handler.py": "def handler(event, context):\n    return event"},
+            requirements=["fakepkg==1.0"],
+            working_dir=str(tmp_path),
+        )
+
+    command = check_call.call_args_list[0].args[0]
+    assert "--no-compile" in command

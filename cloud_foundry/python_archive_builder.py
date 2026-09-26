@@ -15,6 +15,18 @@ from urllib.parse import urlparse
 
 log = logger(__name__)
 
+# Bytecode is left out of both the cache hash and the archive. pip compiles
+# with the *build* interpreter, so the .pyc files are tagged for that version
+# (useless to a Lambda runtime on another minor version) and carry the
+# install time in their header -- which changed the hash and the zip bytes on
+# every build and made every deploy re-upload every function.
+_EXCLUDED_DIRS = frozenset({"__pycache__"})
+_EXCLUDED_SUFFIXES = (".pyc", ".pyo")
+
+# Fixed zip entry timestamp (the earliest the zip format can store), so an
+# unchanged tree always produces byte-identical archive bytes.
+_ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
 
 class PythonArchiveBuilder(ArchiveBuilder):
     """
@@ -87,13 +99,14 @@ class PythonArchiveBuilder(ArchiveBuilder):
             hash_comparator.write(self._hash, self._base_dir)
 
     def _build_cache_hash(self, hash_comparator: HashComparator) -> str:
-        staging_hash = hash_comparator.hash_folder(self._staging)
-        libs_hash = hash_comparator.hash_folder(self._libs)
         digest = hashlib.sha256()
-        digest.update(staging_hash.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(libs_hash.encode("utf-8"))
-        digest.update(b"\0")
+        for folder in (self._staging, self._libs):
+            for relative_path, full_path in self._archive_files(folder):
+                digest.update(relative_path.encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(hash_comparator.hash_file(full_path).encode("utf-8"))
+                digest.update(b"\0")
+            digest.update(b"\0")
         digest.update(self._target_architecture.encode("utf-8"))
         digest.update(b"\0")
         for requirement in self._requirements:
@@ -118,6 +131,22 @@ class PythonArchiveBuilder(ArchiveBuilder):
         if normalized == "arm64":
             return ["manylinux2014_aarch64", "manylinux_2_17_aarch64"]
         return ["manylinux2014_x86_64", "manylinux_2_17_x86_64"]
+
+    @staticmethod
+    def _archive_files(folder: str) -> list[tuple[str, str]]:
+        """(relative path, full path) of every file that goes into the
+        archive from ``folder``, in a stable order. The cache hash and the
+        archive both use this list, so they always agree on the contents."""
+        files = []
+        for root, dirs, names in os.walk(folder):
+            dirs[:] = sorted(d for d in dirs if d not in _EXCLUDED_DIRS)
+            for name in sorted(names):
+                if name.endswith(_EXCLUDED_SUFFIXES):
+                    continue
+                full_path = os.path.join(root, name)
+                relative_path = os.path.relpath(full_path, folder)
+                files.append((relative_path.replace(os.sep, "/"), full_path))
+        return files
 
     def hash(self) -> str:
         """Return the hash of the current archive."""
@@ -148,20 +177,19 @@ class PythonArchiveBuilder(ArchiveBuilder):
         """
         log.info(f"building archive: {self.name}")
         try:
-            # Create the archive file
-            archive_name = self._location.replace(".zip", "")
-            with zipfile.ZipFile(
-                f"{archive_name}.zip", "w", zipfile.ZIP_DEFLATED
-            ) as archive:
+            # Entries are written in a fixed order with a fixed timestamp and
+            # normalized permissions, so the same tree always gives the same
+            # bytes -- Pulumi diffs the archive by content.
+            with zipfile.ZipFile(self._location, "w", zipfile.ZIP_DEFLATED) as archive:
                 # Include both 'staging' and 'libs' folders in the archive
-                for folder in ["staging", "libs"]:
-                    folder_path = os.path.join(self._base_dir, folder)
-                    if os.path.exists(folder_path):
-                        for root, _, files in os.walk(folder_path):
-                            for file in files:
-                                full_path = os.path.join(root, file)
-                                relative_path = os.path.relpath(full_path, folder_path)
-                                archive.write(full_path, relative_path)
+                for folder in (self._staging, self._libs):
+                    for relative_path, full_path in self._archive_files(folder):
+                        info = zipfile.ZipInfo(relative_path, date_time=_ZIP_EPOCH)
+                        info.compress_type = zipfile.ZIP_DEFLATED
+                        executable = os.stat(full_path).st_mode & 0o111
+                        info.external_attr = (0o100755 if executable else 0o100644) << 16
+                        with open(full_path, "rb") as source:
+                            archive.writestr(info, source.read())
 
             log.info("Archive built successfully")
         except Exception as e:
@@ -245,6 +273,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
                         "--python-version",
                         "3.12",
                         "--upgrade",
+                        "--no-compile",
                         "-r",
                         requirements_file,
                     ],
@@ -283,6 +312,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
                         "--target",
                         self._libs,
                         "--upgrade",
+                        "--no-compile",
                         "-r",
                         requirements_file,
                     ]

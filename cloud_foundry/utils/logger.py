@@ -3,12 +3,21 @@ import os
 
 # Configuring the logging module with basic settings, including format and log level,
 # where the log level is obtained from the environment variable LOGGING_LEVEL
-# with a default of DEBUG, and force=True to ensure the configuration is applied immediately.
+# with a default of INFO, and force=True to ensure the configuration is applied immediately.
 logging.basicConfig(
     format="%(name)s:%(lineno)s - %(levelname)s - %(message)s",
-    level=os.getenv("LOGGING_LEVEL", "DEBUG").upper(),
+    level=os.getenv("LOGGING_LEVEL", "INFO").upper(),
     force=True,
 )
+
+# At DEBUG, botocore logs signed request headers (including
+# x-amz-security-token) and request bodies. Keep the AWS SDK quiet whatever
+# LOGGING_LEVEL says; AWS_SDK_LOGGING_LEVEL turns it back on deliberately.
+AWS_SDK_LOGGERS = ("boto3", "botocore", "s3transfer", "urllib3")
+for _sdk_logger in AWS_SDK_LOGGERS:
+    logging.getLogger(_sdk_logger).setLevel(
+        os.getenv("AWS_SDK_LOGGING_LEVEL", "WARNING").upper()
+    )
 
 WARN = logging.WARN
 INFO = logging.INFO
@@ -27,8 +36,8 @@ def logger(name=None):
 
     """
     # Retrieving the logging level from the environment variable LOGGING_LEVEL
-    # with a default of DEBUG, and converting it to uppercase
-    loggingLevel = os.getenv("LOGGING_LEVEL", "DEBUG").upper()
+    # with a default of INFO, and converting it to uppercase
+    loggingLevel = os.getenv("LOGGING_LEVEL", "INFO").upper()
 
     # Setting the logging level for the root logger to the obtained logging level
     logging.getLogger().setLevel(loggingLevel)
