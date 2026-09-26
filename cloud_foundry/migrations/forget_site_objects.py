@@ -11,7 +11,10 @@ Run this once per stack, right before the first `pulumi up` with the new
 cloud_foundry. It removes the per-file resources from the Pulumi state only;
 the S3 objects stay where they are, and the next deploy takes them over.
 
-    python -m cloud_foundry.migrations.forget_site_objects --stack dev [--cwd infra/api] [--dry-run]
+    python -m cloud_foundry.migrations.forget_site_objects --stack dev [--cwd <project dir>] [--dry-run]
+
+--cwd is the Pulumi project directory (the one holding Pulumi.yaml),
+relative to where you run the command; it defaults to the current directory.
 
 The exported state is saved next to the working directory first, so
 `pulumi stack import --file <backup>` puts it back if needed.
@@ -20,6 +23,7 @@ The exported state is saved next to the working directory first, so
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,14 +73,39 @@ def _pulumi(args: list[str], cwd: str) -> None:
     subprocess.run(["pulumi", *args], cwd=cwd, check=True)
 
 
+def _project_problem(cwd: str) -> str | None:
+    """Why ``cwd`` can't be used as the Pulumi project directory, if it can't."""
+    if not os.path.isdir(cwd):
+        return f"{cwd} does not exist"
+    if not any(os.path.isfile(os.path.join(cwd, name)) for name in ("Pulumi.yaml", "Pulumi.yml")):
+        return f"{cwd} has no Pulumi.yaml"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--stack", required=True)
-    parser.add_argument("--cwd", default=".", help="Pulumi project directory")
+    parser.add_argument(
+        "--cwd",
+        default=".",
+        help="Pulumi project directory, relative to where you run this (default: current directory)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="report only; change nothing")
     args = parser.parse_args(argv)
 
     cwd = os.path.abspath(args.cwd)
+    problem = _project_problem(cwd)
+    if problem:
+        print(
+            f"{problem}. --cwd must be the Pulumi project directory, relative to "
+            f"where you run this command (it defaults to the current directory). "
+            f"Nothing was changed.",
+            file=sys.stderr,
+        )
+        return 2
+    if shutil.which("pulumi") is None:
+        print("The pulumi CLI is not on PATH. Nothing was changed.", file=sys.stderr)
+        return 2
     stamp = time.strftime("%Y%m%dT%H%M%S")
     backup = os.path.join(cwd, f"{args.stack}-state-backup-{stamp}.json")
     _pulumi(["stack", "export", "--stack", args.stack, "--file", backup], cwd)
