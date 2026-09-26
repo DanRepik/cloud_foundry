@@ -50,6 +50,8 @@ dev = [
     "python-dotenv",
     "pyjwt",
     "psycopg2-binary",
+    # In-process S3 for the UIPublisher sync provider's unit tests.
+    "moto[s3]>=5.0",
 ]
 
 # fixture_foundry is NOT listed above on purpose. PyPI's upload API rejects
