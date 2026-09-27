@@ -100,3 +100,22 @@ def test_get_origins_with_plain_rest_api_resolves_from_local_variable(
     assert calls[0]["stage_name"] == "plain-rest-api"
     assert calls[0]["rest_api_id"] == "plain-rest-api_id"
     assert len(cdn_origins) == 1
+
+
+@pytest.mark.unit
+def test_site_origin_uses_origin_access_control_without_an_s3_origin_config():
+    # An empty s3_origin_config (origin_access_identity="") alongside the
+    # origin access control reads back from the provider as no block at all,
+    # so every preview showed a CloudFront origins update that changed nothing.
+    from cloud_foundry.pulumi.cdn_site_origin import SiteOrigin
+
+    pulumi.runtime.set_mocks(RecordingMocks(), preview=False)
+    bucket = aws.s3.BucketV2("site-bucket")
+
+    origin = SiteOrigin("site", bucket, origin_shield_region="us-east-1")
+    distribution_origin = origin.create_distribution_origin()
+
+    assert distribution_origin.s3_origin_config is None
+    assert distribution_origin.custom_origin_config is None
+    assert distribution_origin.origin_access_control_id is not None
+    assert distribution_origin.origin_shield.origin_shield_region == "us-east-1"
