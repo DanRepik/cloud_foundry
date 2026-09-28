@@ -119,9 +119,11 @@ class SiteOrigin(pulumi.ComponentResource):
             origin_id=self.origin_id,
             origin_access_control_id=origin_access_control.id,
             origin_path=origin_path,
-            s3_origin_config=aws.cloudfront.DistributionOriginS3OriginConfigArgs(
-                origin_access_identity=""
-            ),
+            # No s3_origin_config: access goes through the origin access
+            # control above, and an S3 origin without one gets CloudFront's
+            # empty-identity config anyway. Declaring the empty block made
+            # every preview show an origins update, because the provider
+            # reads that block back as absent.
         )
 
         if origin_shield_region:
