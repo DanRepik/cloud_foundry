@@ -58,7 +58,11 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           pkg_version="$(python -c "import re; print(re.search(r'version\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]', open('cloud_foundry/__init__.py').read()).group(1))")"
           if [ "$tag" != "$pkg_version" ]; then
-            echo "::error::Release tag '${GITHUB_REF_NAME}' does not match cloud_foundry/__init__.py version '${pkg_version}'. Bump the version in cloud_foundry/__init__.py and re-tag before publishing."
+            # The version in the code is what gets built and published, and
+            # the tag is fixed to the commit it was created on. Changing the
+            # code afterwards doesn't move the tag, so fix the release, not
+            # the version (unless the version itself is wrong).
+            echo "::error::Release tag '${GITHUB_REF_NAME}' is on a commit whose cloud_foundry/__init__.py version is '${pkg_version}'. If ${pkg_version} is the version to publish, delete this release and its tag and create release v${pkg_version} on this commit. If the version is wrong, fix it on main first, then create the release on that new commit. Changing the version after tagging doesn't help: the tag still points at this commit."
             exit 1
           fi
 
