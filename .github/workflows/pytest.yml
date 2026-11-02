@@ -28,6 +28,12 @@ jobs:
         with:
           python-version: '3.x'
 
+      # tests/test_aws_open_api_editor.py's S3 fixtures deploy a real stack
+      # into LocalStack through the Automation API, which shells out to the
+      # pulumi CLI. The runner image does not provide it.
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v6
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
