@@ -21,10 +21,18 @@ from cloud_foundry.pulumi.domain import domain  # noqa: F401
 
 from cloud_foundry.pulumi.queue import queue  # noqa: F401
 from cloud_foundry.pulumi.topic import topic  # noqa: F401
+from cloud_foundry.pulumi.topic_subscription import (  # noqa: F401
+    subscribe_queue_to_topic,
+)
+from cloud_foundry.pulumi.schedule import schedule, Schedule  # noqa: F401
+from cloud_foundry.pulumi.postgres_schema import (  # noqa: F401
+    postgres_schema,
+    PostgresSchema,
+)
 from cloud_foundry.pulumi.idle_reaper import attach_idle_reaper  # noqa: F401
 from cloud_foundry.utils.idle_reaper_client import request_mapping_enable  # noqa: F401
 
 from cloud_foundry.utils.names import resource_id  # noqa: F401
 from cloud_foundry.utils.names import project_slug  # noqa: F401
 
-version = "0.4.2"
+version = "0.5.0"
