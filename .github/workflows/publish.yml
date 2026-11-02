@@ -35,6 +35,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      # The LocalStack stack tests (tests/test_aws_open_api_editor.py) run
+      # the pulumi CLI through the Automation API -- see pytest.yml.
+      - uses: pulumi/actions@v6
       - run: python -m pip install --upgrade pip
       - run: pip install -e .[dev]
       # Not in the dev extra -- see the note above it in pyproject.toml:
