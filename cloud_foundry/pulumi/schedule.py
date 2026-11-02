@@ -22,8 +22,10 @@ from cloud_foundry.utils.names import resource_id
 
 
 def _function_name(function) -> Input[str]:
+    # Outputs of the Lambda resource, not Function.function_name (a plain
+    # string), so the permission waits for the function to exist.
     if isinstance(function, Function):
-        return function.function_name
+        return function.lambda_.name
     if isinstance(function, aws.lambda_.Function):
         return function.name
     return function
