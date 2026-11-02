@@ -169,7 +169,10 @@ class PostgresSchema(ComponentResource):
         digest = hashlib.sha256((config_json + "\n" + schema_sql).encode()).hexdigest()
         self.invocation = aws.lambda_.Invocation(
             f"{name}-invoke",
-            function_name=self.function.function_name,
+            # The Lambda resource's name Output, not Function.function_name
+            # (a plain string): only the Output makes Pulumi wait for the
+            # function to exist before invoking it.
+            function_name=self.function.lambda_.name,
             # The handler ignores the event; input and triggers only make
             # Pulumi re-invoke when the script, configuration or password
             # changes.
