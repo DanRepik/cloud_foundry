@@ -63,7 +63,8 @@ def fake(monkeypatch):
 def test_master_statements():
     assert bootstrap.master_statements(CONFIG) == [
         'GRANT CONNECT ON DATABASE "candidate_evidence" TO "insight_app"',
-        'CREATE SCHEMA IF NOT EXISTS "insight" AUTHORIZATION "insight_app"',
+        'CREATE SCHEMA IF NOT EXISTS "insight"',
+        'GRANT USAGE, CREATE ON SCHEMA "insight" TO "insight_app"',
         'CREATE EXTENSION IF NOT EXISTS "vector" WITH SCHEMA "insight"',
         'GRANT "cep_lens_reader" TO "insight_app"',
         'ALTER ROLE "insight_app" IN DATABASE "candidate_evidence" '

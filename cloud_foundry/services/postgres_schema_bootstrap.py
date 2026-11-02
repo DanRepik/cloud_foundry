@@ -15,7 +15,7 @@ Steps, each idempotent:
    login role with the password from its own secret, and create the target
    database if ``create_database`` is set.
 2. As the master user, in the target database: grant CONNECT, create each
-   schema owned by the role, create each extension in its schema, grant the
+   schema and grant the role USAGE and CREATE on it, create each extension in its schema, grant the
    listed roles to the role, and set its search_path.
 3. As the role itself: apply ``schema.sql`` in one transaction.
 
@@ -154,8 +154,14 @@ def master_statements(config: dict[str, Any]) -> list[str]:
     database = identifier(config["database"])
     statements = [f"GRANT CONNECT ON DATABASE {database} TO {role}"]
     for schema in config.get("schemas", []):
+        # Created and owned by the master user, with USAGE and CREATE for the
+        # role, which then owns what its script creates. AUTHORIZATION role
+        # would need the master user to be able to SET ROLE to it, which an
+        # Aurora master (rds_superuser, not a superuser) cannot by default
+        # on PostgreSQL 16.
+        statements.append(f"CREATE SCHEMA IF NOT EXISTS {identifier(schema)}")
         statements.append(
-            f"CREATE SCHEMA IF NOT EXISTS {identifier(schema)} AUTHORIZATION {role}"
+            f"GRANT USAGE, CREATE ON SCHEMA {identifier(schema)} TO {role}"
         )
     for extension in config.get("extensions", []):
         statement = f"CREATE EXTENSION IF NOT EXISTS {identifier(extension['name'])}"

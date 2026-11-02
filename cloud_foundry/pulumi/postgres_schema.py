@@ -42,7 +42,7 @@ _SERVICE = "file://" + str(
 
 
 class PostgresSchema(ComponentResource):
-    """A login role and the schema it owns, kept in step with a script.
+    """A login role and its schema, kept in step with a script.
 
     Attributes:
         secret (aws.secretsmanager.Secret): The role's credentials
@@ -220,12 +220,13 @@ def postgres_schema(
         master_secret_arn: Secret of a user that can create roles, schemas
             and extensions and grant ``member_of`` roles.
         database: Target database.
-        role_name: Login role to create or update; owns ``schemas`` and
+        role_name: Login role to create or update; uses ``schemas`` and
             applies the script.
         schema_sql_path: Script applied as ``role_name`` in one transaction.
             Write it to be re-runnable (``IF NOT EXISTS``, ``CREATE OR
             REPLACE``).
-        schemas: Schemas created with ``role_name`` as owner.
+        schemas: Schemas created by the master user, with USAGE and CREATE
+            granted to ``role_name`` (which owns what its script creates).
         extensions: ``[{"name": ..., "schema": ...}]``, created by the master
             user (extensions need it).
         member_of: Existing roles granted to ``role_name``.
