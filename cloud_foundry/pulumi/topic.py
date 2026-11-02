@@ -1,11 +1,11 @@
 """SNS Topic component for Pub/Sub messaging."""
 
-import json
 from typing import Optional
 from pulumi import ComponentResource, Output, ResourceOptions
 import pulumi_aws as aws
 from cloud_foundry.utils.names import resource_id
 from .queue import Queue
+from .topic_subscription import subscribe_queue_to_topic
 
 
 class TopicArgs:
@@ -60,7 +60,14 @@ class Topic(ComponentResource):
         if args.subscriptions:
             for subscription in args.subscriptions:
                 if subscription.get("queue"):
-                    self.subscribe(subscription["queue"])
+                    self.subscribe(
+                        subscription["queue"],
+                        filter_policy=subscription.get("filter_policy"),
+                        filter_policy_scope=subscription.get("filter_policy_scope"),
+                        raw_message_delivery=subscription.get(
+                            "raw_message_delivery", False
+                        ),
+                    )
 
         # Register outputs to signal component completion
         self.register_outputs(
@@ -86,51 +93,34 @@ class Topic(ComponentResource):
         """
         return self.topic.name
 
-    def subscribe(self, queue: Queue, opts: ResourceOptions = None) -> None:
+    def subscribe(
+        self,
+        queue: Queue,
+        opts: ResourceOptions = None,
+        filter_policy: Optional[dict] = None,
+        filter_policy_scope: Optional[str] = None,
+        raw_message_delivery: bool = False,
+    ) -> None:
         """Subscribe an SQS queue to this SNS topic.
         Args:
             queue (Queue): The SQS queue to subscribe.
             opts (ResourceOptions, optional): Pulumi resource options.
+            filter_policy (dict, optional): SNS filter policy. None delivers
+                every message.
+            filter_policy_scope (str, optional): "MessageAttributes" (the
+                SNS default) or "MessageBody".
+            raw_message_delivery (bool): Deliver without the SNS envelope.
         """
-        name = f"{self.name}-{queue.name}"
-
-        # Merge parent options with provided options
-        resource_opts = ResourceOptions.merge(ResourceOptions(parent=self), opts)
-
-        # Allow SNS to send messages to SQS
-        queue_policy = aws.sqs.QueuePolicy(
-            f"{resource_id(name)}-policy",
-            queue_url=queue.url,
-            policy=Output.all(queue_arn=queue.arn, topic_arn=self.topic.arn).apply(
-                lambda args: json.dumps(
-                    {
-                        "Version": "2012-10-17",
-                        "Statement": [
-                            {
-                                "Effect": "Allow",
-                                "Principal": {"Service": "sns.amazonaws.com"},
-                                "Action": "sqs:SendMessage",
-                                "Resource": args["queue_arn"],
-                                "Condition": {
-                                    "ArnEquals": {"aws:SourceArn": args["topic_arn"]}
-                                },
-                            }
-                        ],
-                    }
-                )
-            ),
-            opts=resource_opts,
-        )
-
-        # Subscribe queue to topic (depends on policy being created first)
-        aws.sns.TopicSubscription(
-            f"{resource_id(name)}-sub",
-            topic=self.topic.arn,
-            protocol="sqs",
-            endpoint=queue.arn,
-            opts=ResourceOptions.merge(
-                resource_opts, ResourceOptions(depends_on=[queue_policy])
-            ),
+        subscribe_queue_to_topic(
+            f"{self.name}-{queue.name}",
+            topic_arn=self.topic.arn,
+            queue=queue,
+            filter_policy=filter_policy,
+            filter_policy_scope=filter_policy_scope,
+            raw_message_delivery=raw_message_delivery,
+            # Parented to the topic, as before, so existing stacks keep
+            # their resource URNs.
+            opts=ResourceOptions.merge(ResourceOptions(parent=self), opts),
         )
 
 

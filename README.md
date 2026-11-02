@@ -841,3 +841,39 @@ cdn_instance = CDN(
 #### **Conclusion**
 
 The `cdn` function simplifies the deployment of a Content Delivery Network using AWS CloudFront, Route 53, and ACM. It supports static sites, APIs, custom domains, and advanced features like logging and geo-restrictions. This function is ideal for building scalable, secure, and performant web applications.
+
+## `subscribe_queue_to_topic`, `schedule` and `postgres_schema`
+
+Added in 0.5.0.
+
+- **`subscribe_queue_to_topic(name, topic_arn=..., queue=..., filter_policy=None, filter_policy_scope=None, raw_message_delivery=False)`** subscribes a `Queue` to an SNS topic, including one imported by ARN from another stack, with an optional filter policy (`filter_policy_scope="MessageBody"` filters on fields of a JSON body). `Queue.subscribe_to_topic(topic_arn, ...)` is the same thing from the queue's side, and `Topic.subscribe` now takes the same filter arguments. The queue policy it creates is the queue's only policy, so give each topic its own queue.
+- **`schedule(name, schedule_expression=..., function=... | target_arn=..., input=None, enabled=True)`** creates an EventBridge rule with one target. For a function it also grants EventBridge the invoke permission; for any other target, pass `target_arn` (and `role_arn` if the target needs one) and grant access yourself.
+- **`postgres_schema(name, cluster_arn=..., master_secret_arn=..., database=..., role_name=..., schema_sql_path=..., schemas=[...], extensions=[{"name": "vector", "schema": "..."}], member_of=[...], search_path=[...])`** gives an application its own login role and schema on a shared Aurora cluster. It creates the role's credentials secret and a bootstrap Lambda that, over the RDS Data API and with no VPC attachment, creates or updates the role as the master user, creates the schemas (granting the role USAGE and CREATE) and extensions, grants the `member_of` roles, sets the search path, and then applies the script as the role in one transaction. Pulumi re-runs it when the script, the configuration or the password changes. The script and configuration are bundled into the function, never read from the invocation event.
+
+```python
+from cloud_foundry import postgres_schema, python_function, queue, schedule
+
+db = postgres_schema(
+    "insight-db",
+    cluster_arn=shared_cluster_arn,
+    master_secret_arn=shared_master_secret_arn,
+    database="candidate_evidence",
+    role_name="insight_app",
+    schemas=["insight"],
+    extensions=[{"name": "vector", "schema": "insight"}],
+    member_of=["cep_lens_reader"],
+    search_path=["insight", "cep", "public"],
+    schema_sql_path="resources/insight_schema.sql",
+)
+
+inbox = queue("index-requests", visibility_timeout=900)
+inbox.subscribe_to_topic(
+    cep_events_topic_arn,
+    filter_policy={"operation": ["artifact_version_created"]},
+    filter_policy_scope="MessageBody",
+)
+worker = python_function("index-worker", sources={"app.py": "file://worker.py"})
+inbox.subscribe(worker, batch_size=1, maximum_concurrency=4)
+schedule("index-reconcile", schedule_expression="rate(1 hour)",
+         function=worker, input={"operation": "index_reconcile"})
+```

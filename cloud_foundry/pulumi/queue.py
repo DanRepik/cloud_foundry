@@ -165,7 +165,7 @@ class Queue(ComponentResource):
         if isinstance(function, Function):
             function_name = function.function_name
         elif isinstance(function, aws.lambda_.Function):
-            function_name = function.function_name
+            function_name = function.name
         else:
             function_name = function
 
@@ -199,6 +199,40 @@ class Queue(ComponentResource):
         return aws.lambda_.EventSourceMapping(
             f"{resource_id(self.name)}-source",
             **mapping_args,
+        )
+
+    def subscribe_to_topic(
+        self,
+        topic_arn,
+        filter_policy: Optional[dict] = None,
+        filter_policy_scope: Optional[str] = None,
+        raw_message_delivery: bool = False,
+    ) -> aws.sns.TopicSubscription:
+        """Subscribe this queue to an SNS topic by ARN, such as one exported
+        by another stack.
+
+        Args:
+            topic_arn: ARN of the topic (str or Output).
+            filter_policy: SNS filter policy. None delivers every message.
+            filter_policy_scope: "MessageAttributes" (the SNS default) or
+                "MessageBody".
+            raw_message_delivery: Deliver without the SNS envelope.
+
+        Returns:
+            aws.sns.TopicSubscription: The created subscription.
+        """
+        from cloud_foundry.pulumi.topic_subscription import (
+            subscribe_queue_to_topic,
+        )
+
+        return subscribe_queue_to_topic(
+            f"{self.name}-topic",
+            topic_arn=topic_arn,
+            queue=self,
+            filter_policy=filter_policy,
+            filter_policy_scope=filter_policy_scope,
+            raw_message_delivery=raw_message_delivery,
+            opts=ResourceOptions(parent=self),
         )
 
 

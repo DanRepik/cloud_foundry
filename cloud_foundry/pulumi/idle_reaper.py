@@ -32,7 +32,7 @@ import json
 from typing import Optional
 
 import pulumi_aws as aws
-from pulumi import Output, ResourceOptions
+from pulumi import Input, Output, ResourceOptions
 
 from cloud_foundry.utils.names import account_id, region
 
@@ -57,8 +57,8 @@ def attach_idle_reaper(
     queue,
     event_source_mapping: aws.lambda_.EventSourceMapping,
     *,
-    reaper_function_name: str,
-    reaper_role_name: str,
+    reaper_function_name: Input[str],
+    reaper_role_name: Input[str],
     resource_prefix: str,
     interval_minutes: int = 10,
     event_bus_name: str = "default",
@@ -128,8 +128,10 @@ def attach_idle_reaper(
         opts=opts,
     )
 
-    reaper_arn = (
-        f"arn:aws:lambda:{region()}:{account_id()}:function:{reaper_function_name}"
+    # Either a plain str or an Output (e.g. a StackReference output from
+    # another project), so build the ARN inside apply().
+    reaper_arn = Output.from_input(reaper_function_name).apply(
+        lambda name: f"arn:aws:lambda:{region()}:{account_id()}:function:{name}"
     )
 
     aws.cloudwatch.EventTarget(
