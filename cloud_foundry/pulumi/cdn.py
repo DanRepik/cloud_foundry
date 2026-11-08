@@ -310,7 +310,15 @@ class CDN(pulumi.ComponentResource):
                 )
             ),
             viewer_certificate={
-                "acm_certificate_arn": custom_certificate.certificate.arn,
+                # The validated certificate's ARN, not the raw one: ACM
+                # certificates are created pending validation, and
+                # CloudFront rejects them (InvalidViewerCertificate) until
+                # validation completes. CertificateValidation is created
+                # inside an apply, so depends_on=[custom_certificate]
+                # cannot wait for it, but this output can.
+                "acm_certificate_arn": custom_certificate.validation.apply(
+                    lambda validation: validation.certificate_arn
+                ),
                 "ssl_support_method": "sni-only",
                 "minimum_protocol_version": "TLSv1.2_2021",
             },
