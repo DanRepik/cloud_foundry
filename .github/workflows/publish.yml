@@ -1,14 +1,15 @@
 name: publish
 
 # Builds and publishes cloud-foundry to PyPI when a GitHub Release is
-# published. Versioning is NOT tag-derived: cloud_foundry/__init__.py's
-# `version = "x.y.z"` is the source of truth (read via [tool.hatch.version]
-# in pyproject.toml), so the check below fails fast if the release tag
-# doesn't match it -- PyPI rejects a re-upload of an already-published
-# version, and that mismatch is an easy thing to forget by hand.
+# published. The release tag is the source of truth for the version: the
+# build job stamps vX.Y.Z into cloud_foundry/__init__.py's `version`
+# (read via [tool.hatch.version] in pyproject.toml) before building, so
+# nothing has to be bumped by hand and a forgotten bump can no longer make
+# a publish fail. The `version` committed in the repo is only what a
+# source checkout reports; PyPI gets the tag's.
 #
-# Tag releases as vX.Y.Z (e.g. v0.2.5) to match a version = "0.2.5" in
-# cloud_foundry/__init__.py.
+# Tag releases as vX.Y.Z (e.g. v0.5.2); anything else fails fast, and PyPI
+# rejects a re-upload of an already-published version.
 #
 # Publishing uses PyPI Trusted Publishing (OIDC) -- no PyPI token is
 # stored anywhere. One-time setup: on the cloud-foundry project's PyPI
@@ -55,19 +56,18 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Check release tag matches package version
+      - name: Stamp the release tag's version into the package
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          pkg_version="$(python -c "import re; print(re.search(r'version\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]', open('cloud_foundry/__init__.py').read()).group(1))")"
-          if [ "$tag" != "$pkg_version" ]; then
-            # The version in the code is what gets built and published, and
-            # the tag is fixed to the commit it was created on. Changing the
-            # code afterwards doesn't move the tag, so fix the release, not
-            # the version (unless the version itself is wrong).
-            echo "::error::Release tag '${GITHUB_REF_NAME}' is on a commit whose cloud_foundry/__init__.py version is '${pkg_version}'. If ${pkg_version} is the version to publish, delete this release and its tag and create release v${pkg_version} on this commit. If the version is wrong, fix it on main first, then create the release on that new commit. Changing the version after tagging doesn't help: the tag still points at this commit."
+          tag="${GITHUB_REF_NAME}"
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([abrc.]*[0-9]+)?$ ]]; then
+            echo "::error::Release tag '${tag}' is not vX.Y.Z (e.g. v0.5.2)."
             exit 1
           fi
+          version="${tag#v}"
+          sed -i -E "s/^version = \"[^\"]*\"/version = \"${version}\"/" cloud_foundry/__init__.py
+          grep -n '^version = ' cloud_foundry/__init__.py
+          grep -q "^version = \"${version}\"" cloud_foundry/__init__.py
 
       # python -m build, not flit -- the declared [build-system] backend
       # is hatchling, which understands [tool.hatch.version]. flit's own
