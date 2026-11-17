@@ -181,6 +181,10 @@ class Queue(ComponentResource):
             "event_source_arn": self.queue.arn,
             "function_name": function_name,
             "batch_size": batch_size,
+            # Without this, Lambda ignores a returned batchItemFailures list
+            # and deletes the whole batch. Harmless for handlers that raise
+            # (whole batch retried) or return anything else (batch succeeds).
+            "function_response_types": ["ReportBatchItemFailures"],
             "opts": ResourceOptions(
                 parent=self,
                 depends_on=depends_on,
