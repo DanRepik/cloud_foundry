@@ -128,3 +128,19 @@ def test_explicit_name_tag_overrides_default(mocks):
     main = _find(mocks, "aws:sqs/queue:Queue", "ingestion-pipeline")
 
     assert main.inputs["tags"] == {"Name": "custom-name"}
+
+
+@pytest.mark.unit
+def test_subscribe_honors_partial_batch_failures(mocks):
+    # A handler's batchItemFailures is ignored unless the mapping opts in;
+    # then a failed message is deleted instead of retried.
+    queue("ingestion-pipeline").subscribe("worker", batch_size=1)
+    _drain_pulumi_event_loop()
+
+    mapping = next(
+        r
+        for r in mocks.created
+        if r.typ == "aws:lambda/eventSourceMapping:EventSourceMapping"
+    )
+
+    assert mapping.inputs["functionResponseTypes"] == ["ReportBatchItemFailures"]
