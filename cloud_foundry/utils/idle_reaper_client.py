@@ -51,7 +51,7 @@ def request_mapping_enable(
             up from the caller's ambient environment/credentials.
     """
     events = boto3.client("events", region_name=region_name)
-    events.put_events(
+    response = events.put_events(
         Entries=[
             {
                 "EventBusName": event_bus_name,
@@ -61,3 +61,7 @@ def request_mapping_enable(
             }
         ]
     )
+    # put_events reports per-entry failures (e.g. throttling) in the response
+    # instead of raising; a lost request leaves the mapping disabled.
+    if response.get("FailedEntryCount"):
+        raise RuntimeError(f"EnableMapping event not accepted: {response['Entries']}")

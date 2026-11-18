@@ -13,35 +13,37 @@ MAIL_ORIGIN = os.environ["MAIL_ORIGIN"]
 
 
 def handler(event, context):
-    log.info("Received event: %s", json.dumps(event))
-    try:
-        responses = []
-        for record in event["Records"]:
-            if "Sns" in record:
-                sns_message = json.loads(record["Sns"]["Message"])
-            elif "body" in record:
-                sns_message = json.loads(record["body"])
-            else:
-                raise ValueError("Unsupported message format")
-            template_name = sns_message["template_name"]
-            context_data = sns_message["context"]
-            recipients = sns_message["recipients"]
-            subject = sns_message["subject"]
-            cc = sns_message.get("cc", [])  # Get CC list, default to an empty list
-            bcc = sns_message.get("bcc", [])  # Get BCC list, default to an empty list
+    # Errors must reach Lambda: a normal return tells SNS/SQS the message was
+    # delivered, so it is deleted instead of retried or sent to the DLQ.
+    failures = []
+    for record in event["Records"]:
+        try:
+            send_record(record)
+        except Exception:
+            if "messageId" not in record:  # SNS or direct invoke: let it retry
+                raise
+            log.exception("Failed to send SQS message %s", record["messageId"])
+            failures.append({"itemIdentifier": record["messageId"]})
+    # Read by SQS event source mappings with ReportBatchItemFailures.
+    return {"batchItemFailures": failures}
 
-            email_body = render_template(template_name, context_data)
-            response = send_email(recipients, subject, email_body, cc, bcc)
-            responses.append(response)
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps(
-                {"message": "Emails sent successfully", "responses": responses}
-            ),
-        }
-    except Exception as e:
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+def send_record(record):
+    if "Sns" in record:
+        message = json.loads(record["Sns"]["Message"])
+    elif "body" in record:
+        message = json.loads(record["body"])
+    else:
+        raise ValueError("Unsupported message format")
+
+    email_body = render_template(message["template_name"], message["context"])
+    return send_email(
+        message["recipients"],
+        message["subject"],
+        email_body,
+        message.get("cc", []),
+        message.get("bcc", []),
+    )
 
 
 def render_template(template_name, context):

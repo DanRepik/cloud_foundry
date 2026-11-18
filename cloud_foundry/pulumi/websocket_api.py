@@ -60,9 +60,8 @@ class WebSocketAPI(pulumi.ComponentResource):
                 - require_auth (bool, optional): Whether this route
                   requires authorization
             authorizer (Optional[dict]): Authorizer configuration with:
-                - type (str): "lambda" or "cognito"
-                - function: Lambda function for lambda authorizer
-                - user_pool_arns: List of Cognito user pool ARNs
+                - type (str): "lambda" (the only supported type)
+                - function: Lambda function for the authorizer
                 - identity_source: Identity source expression
                   (e.g., "route.request.querystring.token")
             hosted_zone_id (Optional[str]): Route 53 hosted zone ID
@@ -147,6 +146,17 @@ class WebSocketAPI(pulumi.ComponentResource):
 
             if "function" not in route:
                 raise ValueError(f"Route '{route_key}' must have a 'function' defined")
+
+            # Only a lambda authorizer is built; anything else would leave
+            # the route silently open.
+            if (
+                route.get("require_auth")
+                and (self.authorizer or {}).get("type") != "lambda"
+            ):
+                raise ValueError(
+                    f"Route '{route_key}' has require_auth but no "
+                    "authorizer of type 'lambda' is configured"
+                )
 
         # Check if required routes are defined
         missing_routes = required_routes - seen_routes

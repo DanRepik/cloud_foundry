@@ -163,7 +163,9 @@ def _fake_install(pyc_body: bytes):
         os.makedirs(os.path.join(pkg, "__pycache__"), exist_ok=True)
         with open(os.path.join(pkg, "__init__.py"), "w") as f:
             f.write("VALUE = 1\n")
-        with open(os.path.join(pkg, "__pycache__", "__init__.cpython-311.pyc"), "wb") as f:
+        with open(
+            os.path.join(pkg, "__pycache__", "__init__.cpython-311.pyc"), "wb"
+        ) as f:
             f.write(pyc_body)
 
     return install
@@ -212,7 +214,9 @@ def test_archive_leaves_out_bytecode_and_keeps_sources(tmp_path):
 
 def test_source_change_still_changes_the_hash(tmp_path):
     base = _build(tmp_path / "a", b"pyc")
-    with mock.patch.object(PythonArchiveBuilder, "install_requirements", _fake_install(b"pyc")):
+    with mock.patch.object(
+        PythonArchiveBuilder, "install_requirements", _fake_install(b"pyc")
+    ):
         changed = PythonArchiveBuilder(
             name="test",
             sources={"handler.py": "def handler(event, context):\n    return None"},
@@ -225,7 +229,9 @@ def test_source_change_still_changes_the_hash(tmp_path):
 
 
 def test_pip_is_told_not_to_compile_bytecode(tmp_path):
-    with mock.patch("cloud_foundry.python_archive_builder.subprocess.check_call") as check_call:
+    with mock.patch(
+        "cloud_foundry.python_archive_builder.subprocess.check_call"
+    ) as check_call:
         PythonArchiveBuilder(
             name="test",
             sources={"handler.py": "def handler(event, context):\n    return event"},
@@ -235,3 +241,28 @@ def test_pip_is_told_not_to_compile_bytecode(tmp_path):
 
     command = check_call.call_args_list[0].args[0]
     assert "--no-compile" in command
+
+
+def test_stage_resource_plain_path_copies_the_file(tmp_path, monkeypatch):
+    # sources={"app.py": "./app.py"} (README, examples) must copy the file,
+    # not write the string "./app.py" as the module's code.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(e, c):\n    return 1\n")
+    builder = PythonArchiveBuilder(
+        name="t", sources={"app.py": "./app.py"}, requirements=[], working_dir="w"
+    )
+    with zipfile.ZipFile(builder.location()) as archive:
+        assert archive.read("app.py") == b"def handler(e, c):\n    return 1\n"
+
+
+def test_install_requirements_targets_the_requested_python(tmp_path):
+    with mock.patch("subprocess.check_call") as check_call:
+        PythonArchiveBuilder(
+            name="t",
+            sources={},
+            requirements=["pydantic"],
+            working_dir=str(tmp_path),
+            python_version="3.13",
+        )
+    args = check_call.call_args_list[0].args[0]
+    assert args[args.index("--python-version") + 1] == "3.13"

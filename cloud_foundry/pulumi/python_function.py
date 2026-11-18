@@ -38,6 +38,8 @@ def python_function(
         requirements=requirements,
         working_dir="temp",
         target_architecture=resolved_architecture,
+        # "python3.13" -> "3.13"; Function defaults the runtime to python3.12.
+        python_version=(runtime or "python3.12").removeprefix("python"),
     )
     return Function(
         name=name,

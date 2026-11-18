@@ -47,6 +47,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
         requirements: list[str],
         working_dir: str,
         target_architecture: str = "x86_64",
+        python_version: str = "3.12",
     ):
         """
         Initialize the PythonArchiveBuilder with necessary parameters.
@@ -65,6 +66,8 @@ class PythonArchiveBuilder(ArchiveBuilder):
         self._requirements = requirements or []
         self._working_dir = working_dir
         self._target_architecture = self._normalize_architecture(target_architecture)
+        # Wheels must match the Lambda runtime's ABI, not the build interpreter.
+        self._python_version = python_version
 
         # Base directory where Lambda-related files will be stored
         self._base_dir = os.path.join(self._working_dir, f"{self.name}-lambda")
@@ -187,7 +190,9 @@ class PythonArchiveBuilder(ArchiveBuilder):
                         info = zipfile.ZipInfo(relative_path, date_time=_ZIP_EPOCH)
                         info.compress_type = zipfile.ZIP_DEFLATED
                         executable = os.stat(full_path).st_mode & 0o111
-                        info.external_attr = (0o100755 if executable else 0o100644) << 16
+                        info.external_attr = (
+                            0o100755 if executable else 0o100644
+                        ) << 16
                         with open(full_path, "rb") as source:
                             archive.writestr(info, source.read())
 
@@ -252,9 +257,10 @@ class PythonArchiveBuilder(ArchiveBuilder):
         for index, wheel_platform in enumerate(wheel_platforms, start=1):
             strategy_name = f"Strategy {index}"
             log.info(
-                "%s: Attempting %s platform wheels for Python 3.12",
+                "%s: Attempting %s platform wheels for Python %s",
                 strategy_name,
                 wheel_platform,
+                self._python_version,
             )
             try:
                 subprocess.check_call(
@@ -271,7 +277,7 @@ class PythonArchiveBuilder(ArchiveBuilder):
                         "--implementation",
                         "cp",
                         "--python-version",
-                        "3.12",
+                        self._python_version,
                         "--upgrade",
                         "--no-compile",
                         "-r",
@@ -442,6 +448,8 @@ class PythonArchiveBuilder(ArchiveBuilder):
                 self._get_file_resource(file_path, destination_path)
             elif source_path.startswith(("http://", "https://")):
                 self._get_network_resource(source_path, destination_path)
+            elif os.path.exists(source_path):
+                self._get_file_resource(source_path, destination_path)
             else:  # Inline content
                 os.makedirs(os.path.dirname(destination_path), exist_ok=True)
                 with open(destination_path, "w") as f:
