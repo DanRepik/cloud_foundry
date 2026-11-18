@@ -20,7 +20,9 @@ ISSUER = os.getenv(
 
 def handler(event, context):
     """Main Lambda handler."""
-    log.info(event)
+    # Not the whole event: it carries the bearer token (authorizationToken,
+    # or sec-websocket-protocol on WebSocket connects).
+    log.info("Authorizing %s", event.get("methodArn"))
     try:
         token = parse_token_from_event(check_event_for_error(event))
         decoded_token = decode_token(event, token)
@@ -79,7 +81,6 @@ def parse_token_from_event(event: dict) -> str:
         or not auth_token_parts[1]
     ):
         raise Exception("Invalid AuthorizationToken.")
-    log.info(f"token: {auth_token_parts[1]}")
     return auth_token_parts[1]
 
 
