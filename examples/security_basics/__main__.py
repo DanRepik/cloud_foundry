@@ -1,4 +1,6 @@
 from cloud_foundry import python_function, rest_api
+import pulumi
+import pulumi_aws as aws
 import os
 import boto3
 from dotenv import load_dotenv
@@ -12,6 +14,15 @@ ACCOUNT_ID = (
 USER_POOL_ID = os.getenv("USER_POOL_ID")
 print(f"ACCOUNT_ID: {ACCOUNT_ID}")
 
+# The app client's secret, kept out of the Lambda's environment: the service
+# reads it from Secrets Manager on its first call.
+client_secret = aws.secretsmanager.Secret("security-client-secret")
+client_secret_version = aws.secretsmanager.SecretVersion(
+    "security-client-secret-version",
+    secret_id=client_secret.id,
+    secret_string=os.getenv("CLIENT_SECRET"),
+)
+
 # Define the security function
 security_function = python_function(
     "security-function",
@@ -22,7 +33,7 @@ security_function = python_function(
     environment={
         "CLIENT_ID": os.getenv("CLIENT_ID"),
         "USER_POOL_ID": os.getenv("USER_POOL_ID"),
-        "CLIENT_SECRET": os.getenv("CLIENT_SECRET"),
+        "CLIENT_SECRET_ARN": client_secret.arn,
         # Admin routes (get/delete users, change groups) refuse everyone
         # until this names a Cognito group.
         "USER_ADMIN_GROUP": os.getenv("USER_ADMIN_GROUP"),
@@ -46,8 +57,14 @@ security_function = python_function(
             "Resources": [
                 f"arn:aws:cognito-idp:{REGION}:{ACCOUNT_ID}:userpool/{USER_POOL_ID}"
             ],
-        }
+        },
+        {
+            "Effect": "Allow",
+            "Actions": ["secretsmanager:GetSecretValue"],
+            "Resources": [client_secret.arn],
+        },
     ],
+    opts=pulumi.ResourceOptions(depends_on=[client_secret_version]),
 )
 
 token_validator = python_function(

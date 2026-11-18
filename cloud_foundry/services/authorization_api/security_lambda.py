@@ -59,15 +59,22 @@ class AuthorizationServices:
         self.user_pool_id = user_pool_id or os.getenv("USER_POOL_ID")
         self.client_id = client_id or os.getenv("CLIENT_ID")
         self.client_secret = client_secret or os.getenv("CLIENT_SECRET")
+        # Preferred over CLIENT_SECRET: a Lambda's environment is readable by
+        # anyone with lambda:GetFunctionConfiguration. Read on first use.
+        self.client_secret_arn = os.getenv("CLIENT_SECRET_ARN")
         self.user_admin_group = user_admin_group or os.getenv("USER_ADMIN_GROUP")
         self.user_default_group = user_default_group or os.getenv("USER_DEFAULT_GROUP")
         region = os.getenv("AWS_REGION")
         self.cognito_client = boto3.client("cognito-idp", region_name=region)
 
     def handler(self, event, context):
+        if not self.client_secret and self.client_secret_arn:
+            self.client_secret = boto3.client("secretsmanager").get_secret_value(
+                SecretId=self.client_secret_arn
+            )["SecretString"]
         assert (
             self.user_pool_id and self.client_id and self.client_secret
-        ), "USER_POOL_ID, CLIENT_ID, and CLIENT_SECRET must be set"
+        ), "USER_POOL_ID, CLIENT_ID, and CLIENT_SECRET (or CLIENT_SECRET_ARN) must be set"
 
         path = event.get("resource", "")
         http_method = event.get("httpMethod", "").upper()
@@ -278,9 +285,18 @@ class AuthorizationServices:
             params = {"USERNAME": username, "PASSWORD": body["password"]}
         else:
             return bad_request("password or refresh_token is required")
-        params["SECRET_HASH"] = self.calculate_secret_hash(username)
 
         try:
+            # A refresh's SECRET_HASH must use the user's Cognito username;
+            # in a pool that signs in by email that is the sub, not the email.
+            hash_name = (
+                cognito_client.admin_get_user(
+                    UserPoolId=self.user_pool_id, Username=username
+                )["Username"]
+                if flow == "REFRESH_TOKEN_AUTH"
+                else username
+            )
+            params["SECRET_HASH"] = self.calculate_secret_hash(hash_name)
             response = cognito_client.initiate_auth(
                 AuthFlow=flow, AuthParameters=params, ClientId=self.client_id
             )
@@ -409,8 +425,10 @@ class AuthorizationServices:
         Authorization header is missing, so callers' `if not access_token`
         checks behave correctly.
         """
-        headers = event.get("headers", {})
-        authorization_header = headers.get("Authorization")
+        # Header names arrive in whatever case the client (or CloudFront,
+        # or HTTP/2's lower case) sent.
+        headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+        authorization_header = headers.get("authorization")
 
         if not authorization_header:
             log.error("Authorization header is missing")
