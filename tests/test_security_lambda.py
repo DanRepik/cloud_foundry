@@ -94,3 +94,178 @@ def test_change_password_does_not_log_plaintext_password(
     assert result["statusCode"] == 200
     for record in caplog.records:
         assert secret_password not in record.getMessage()
+
+
+def _admin_event(groups):
+    return {
+        "resource": "/users/{username}",
+        "httpMethod": "DELETE",
+        "headers": {},
+        "pathParameters": {"username": "alice"},
+        "requestContext": {"authorizer": {"cognito:groups": groups}},
+        "body": json.dumps({"groups": ["admin"]}),
+    }
+
+
+@pytest.mark.parametrize("action", ["get_user", "delete_user", "change_user_groups"])
+def test_admin_actions_denied_when_no_admin_group_configured(auth_services, action):
+    # Fail closed: without USER_ADMIN_GROUP nobody may run admin actions.
+    result = getattr(auth_services, action)(_admin_event("admin"))
+    assert result["statusCode"] == 403
+
+
+@pytest.mark.parametrize("action", ["get_user", "delete_user", "change_user_groups"])
+def test_admin_actions_denied_for_non_admin(action):
+    services = AuthorizationServices(
+        "pool", "client", "secret", user_admin_group="admin"
+    )
+    result = getattr(services, action)(_admin_event("user"))
+    assert result["statusCode"] == 403
+
+
+def test_admin_can_delete_user(monkeypatch):
+    deleted = []
+
+    class FakeCognitoClient:
+        def admin_delete_user(self, **kwargs):
+            deleted.append(kwargs["Username"])
+
+    monkeypatch.setattr(security_lambda_module, "cognito_client", FakeCognitoClient())
+    services = AuthorizationServices(
+        "pool", "client", "secret", user_admin_group="admin"
+    )
+
+    result = services.delete_user(_admin_event("admin"))
+
+    assert result["statusCode"] == 200
+    assert deleted == ["alice"]
+
+
+def test_admin_group_read_from_json_encoded_authorizer_context():
+    # examples/security_basics/token_validator.py sends json.dumps(groups).
+    services = AuthorizationServices(
+        "pool", "client", "secret", user_admin_group="admin"
+    )
+    event = {"requestContext": {"authorizer": {"permissions": '["user", "admin"]'}}}
+    assert services.require_admin(event) is None
+
+
+def test_handler_does_not_log_request_body(auth_services, monkeypatch, caplog):
+    event = {
+        "resource": "/nope",
+        "httpMethod": "POST",
+        "body": json.dumps({"password": "sUp3rS3cr3t!"}),
+    }
+    with caplog.at_level("DEBUG"):
+        auth_services.handler(event, None)
+    assert all("sUp3rS3cr3t!" not in r.getMessage() for r in caplog.records)
+
+
+def _client_error(code, http_status=400):
+    from botocore.exceptions import ClientError
+
+    return ClientError(
+        {
+            "Error": {"Code": code, "Message": code},
+            "ResponseMetadata": {"HTTPStatusCode": http_status},
+        },
+        "Op",
+    )
+
+
+@pytest.mark.parametrize(
+    "code, http_status, expected",
+    [
+        ("UsernameExistsException", 400, 409),
+        ("NotAuthorizedException", 400, 401),
+        ("UserNotFoundException", 400, 404),
+        ("TooManyRequestsException", 400, 429),
+        ("InvalidPasswordException", 400, 400),
+        ("InternalErrorException", 500, 500),
+    ],
+)
+def test_cognito_errors_map_to_http_status(code, http_status, expected):
+    from cloud_foundry.services.authorization_api.security_lambda import error_response
+
+    assert error_response(_client_error(code, http_status))["statusCode"] == expected
+
+
+class FakeAuthClient:
+    """Records initiate_auth calls; raises `error` from it when set."""
+
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = []
+
+    def initiate_auth(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return {"AuthenticationResult": {"IdToken": "id", "AccessToken": "access"}}
+
+    def admin_get_user(self, **kwargs):
+        return {"UserAttributes": [{"Name": "email", "Value": "a@b.c"}]}
+
+    def admin_list_groups_for_user(self, **kwargs):
+        return {"Groups": [{"GroupName": "user"}]}
+
+
+def _session_event(body):
+    return {"resource": "/sessions", "httpMethod": "POST", "body": json.dumps(body)}
+
+
+def test_refresh_token_renews_session_on_post_sessions(auth_services, monkeypatch):
+    client = FakeAuthClient()
+    monkeypatch.setattr(security_lambda_module, "cognito_client", client)
+
+    result = auth_services.handler(
+        _session_event({"username": "a@b.c", "refresh_token": "r1"}), None
+    )
+
+    assert result["statusCode"] == 200
+    assert client.calls[0]["AuthFlow"] == "REFRESH_TOKEN_AUTH"
+    assert client.calls[0]["AuthParameters"]["REFRESH_TOKEN"] == "r1"
+    # Cognito returns no new refresh token on refresh; the old one stays valid.
+    assert json.loads(result["body"])["refresh_token"] == "r1"
+
+
+@pytest.mark.parametrize("code", ["NotAuthorizedException", "UserNotFoundException"])
+def test_failed_login_is_401_without_revealing_unknown_users(
+    auth_services, monkeypatch, code
+):
+    monkeypatch.setattr(
+        security_lambda_module, "cognito_client", FakeAuthClient(_client_error(code))
+    )
+    result = auth_services.handler(
+        _session_event({"username": "a@b.c", "password": "pw"}), None
+    )
+    assert result["statusCode"] == 401
+
+
+def test_session_without_password_or_refresh_token_is_400(auth_services):
+    result = auth_services.handler(_session_event({"username": "a@b.c"}), None)
+    assert result["statusCode"] == 400
+
+
+def test_unknown_route_is_404(auth_services):
+    event = {"resource": "/sessions/refresh", "httpMethod": "POST", "body": "{}"}
+    assert auth_services.handler(event, None)["statusCode"] == 404
+
+
+def test_malformed_json_body_is_400(auth_services):
+    event = {"resource": "/users", "httpMethod": "POST", "body": "{not json"}
+    assert auth_services.handler(event, None)["statusCode"] == 400
+
+
+def test_signup_with_taken_username_is_409(auth_services, monkeypatch):
+    class TakenClient:
+        def admin_create_user(self, **kwargs):
+            raise _client_error("UsernameExistsException")
+
+    monkeypatch.setattr(security_lambda_module, "cognito_client", TakenClient())
+    event = {
+        "resource": "/users",
+        "httpMethod": "POST",
+        "body": json.dumps({"username": "a@b.c", "password": "pw"}),
+    }
+    assert auth_services.handler(event, None)["statusCode"] == 409

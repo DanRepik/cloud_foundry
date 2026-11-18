@@ -16,6 +16,37 @@ log.setLevel(os.environ.get("LOGGING_LEVEL", "INFO"))
 cognito_client = boto3.client("cognito-idp")
 
 
+# Cognito error code -> HTTP status. Other client errors stay 400, and
+# Cognito's own server errors become 500.
+COGNITO_STATUS = {
+    "NotAuthorizedException": 401,
+    "UserNotConfirmedException": 403,
+    "PasswordResetRequiredException": 403,
+    "UserNotFoundException": 404,
+    "ResourceNotFoundException": 404,
+    "UsernameExistsException": 409,
+    "TooManyRequestsException": 429,
+    "TooManyFailedAttemptsException": 429,
+    "LimitExceededException": 429,
+}
+
+
+def error_response(e: ClientError, overrides: Optional[dict] = None) -> dict:
+    code = e.response["Error"]["Code"]
+    status = {**COGNITO_STATUS, **(overrides or {})}.get(code)
+    if status is None:
+        upstream = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode", 400)
+        status = 500 if upstream >= 500 else 400
+    return {
+        "statusCode": status,
+        "body": json.dumps({"message": e.response["Error"]["Message"]}),
+    }
+
+
+def bad_request(message: str) -> dict:
+    return {"statusCode": 400, "body": json.dumps({"message": message})}
+
+
 class AuthorizationServices:
     def __init__(
         self,
@@ -34,8 +65,6 @@ class AuthorizationServices:
         self.cognito_client = boto3.client("cognito-idp", region_name=region)
 
     def handler(self, event, context):
-        log.info(f"event: {event}")
-
         assert (
             self.user_pool_id and self.client_id and self.client_secret
         ), "USER_POOL_ID, CLIENT_ID, and CLIENT_SECRET must be set"
@@ -44,32 +73,38 @@ class AuthorizationServices:
         http_method = event.get("httpMethod", "").upper()
         log.info(f"Path: {path}, HTTP Method: {http_method}")
 
-        if path.endswith("/users") and http_method == "POST":
-            return self.create_user(event)
-        elif path.endswith("/users/{username}") and http_method == "GET":
-            return self.get_user(event)
-        elif path.endswith("/users/{username}") and http_method == "DELETE":
-            return self.delete_user(event)
-        elif path.endswith("/users/me/password") and http_method == "PUT":
-            return self.change_user_password(event)
-        elif path.endswith("/users/{username}/groups") and http_method == "PUT":
-            return self.change_user_groups(event)
-        elif path.endswith("/sessions") and http_method == "POST":
-            return self.create_session(event)
-        elif path.endswith("/sessions/me") and http_method == "DELETE":
-            return self.delete_session(event)
-        elif path.endswith("/sessions/refresh") and http_method == "POST":
-            return self.refresh_session(event)
-        else:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": "Invalid action or method"}),
-            }
+        try:
+            if path.endswith("/users") and http_method == "POST":
+                return self.create_user(event)
+            elif path.endswith("/users/{username}") and http_method == "GET":
+                return self.get_user(event)
+            elif path.endswith("/users/{username}") and http_method == "DELETE":
+                return self.delete_user(event)
+            elif path.endswith("/users/me/password") and http_method == "PUT":
+                return self.change_user_password(event)
+            elif path.endswith("/users/{username}/groups") and http_method == "PUT":
+                return self.change_user_groups(event)
+            elif path.endswith("/sessions") and http_method == "POST":
+                return self.create_session(event)
+            elif path.endswith("/sessions/me") and http_method == "DELETE":
+                return self.delete_session(event)
+        except json.JSONDecodeError:
+            return bad_request("Request body must be JSON")
+        return {
+            "statusCode": 404,
+            "body": json.dumps({"message": f"No route for {http_method} {path}"}),
+        }
+
+    @staticmethod
+    def body(event) -> dict:
+        return json.loads(event.get("body") or "{}")
 
     def create_user(self, event):
-        body = json.loads(event["body"])
+        body = self.body(event)
         username = body.get("username") or body.get("email")
         password = body.get("password")
+        if not username or not password:
+            return bad_request("username and password are required")
 
         try:
 
@@ -104,22 +139,12 @@ class AuthorizationServices:
                 "body": json.dumps({"message": "Signup successful"}),
             }
         except ClientError as e:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": e.response["Error"]["Message"]}),
-            }
+            return error_response(e)
 
     def get_user(self, event):
-        # Check if admin group is defined and user is an admin
-        if self.user_admin_group:
-            permissions = self.get_permissions_from_event(event)
-            if self.user_admin_group not in permissions:
-                return {
-                    "statusCode": 403,
-                    "body": json.dumps(
-                        {"message": "You are not authorized to delete users"}
-                    ),
-                }
+        denied = self.require_admin(event)
+        if denied:
+            return denied
 
         username = unquote(event["pathParameters"]["username"])
         try:
@@ -129,22 +154,12 @@ class AuthorizationServices:
                 "body": json.dumps({"user_info": user_info, "groups": sorted(groups)}),
             }
         except ClientError as e:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": e.response["Error"]["Message"]}),
-            }
+            return error_response(e)
 
     def delete_user(self, event):
-        # Check if admin group is defined and user is an admin
-        if self.user_admin_group:
-            permissions = self.get_permissions_from_event(event)
-            if self.user_admin_group not in permissions:
-                return {
-                    "statusCode": 403,
-                    "body": json.dumps(
-                        {"message": "You are not authorized to delete users"}
-                    ),
-                }
+        denied = self.require_admin(event)
+        if denied:
+            return denied
 
         username = event["pathParameters"]["username"]
         try:
@@ -168,13 +183,10 @@ class AuthorizationServices:
             }
         except ClientError as e:
             log.error(f"Error deleting user: {e.response}")
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": e.response["Error"]["Message"]}),
-            }
+            return error_response(e)
 
     def change_user_password(self, event):
-        body = json.loads(event["body"])
+        body = self.body(event)
         try:
             request_context = event.get("requestContext")
             username = request_context.get("authorizer", {}).get("username")
@@ -212,26 +224,15 @@ class AuthorizationServices:
                 "body": json.dumps({"message": "Password changed successfully"}),
             }
         except ClientError as e:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": e.response["Error"]["Message"]}),
-            }
+            return error_response(e)
 
     def change_user_groups(self, event):
-        # Check if admin group is defined and user is an admin
-        if self.user_admin_group:
-            permissions = self.get_permissions_from_event(event)
-            log.info(f"permissions: {permissions}")
-            if self.user_admin_group not in permissions:
-                return {
-                    "statusCode": 403,
-                    "body": json.dumps(
-                        {"message": "You are not authorized to delete users"}
-                    ),
-                }
+        denied = self.require_admin(event)
+        if denied:
+            return denied
 
         username = unquote(event["pathParameters"]["username"])
-        body = json.loads(event["body"])
+        body = self.body(event)
         groups = body.get("groups", [])
 
         try:
@@ -259,49 +260,53 @@ class AuthorizationServices:
                 "body": json.dumps({"message": "User groups updated successfully"}),
             }
         except ClientError as e:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": e.response["Error"]["Message"]}),
-            }
+            # AdminAddUserToGroup reports an unknown group as ResourceNotFound.
+            return error_response(e, {"ResourceNotFoundException": 400})
 
     def create_session(self, event):
-        body = json.loads(event["body"])
+        """Start a session with a password, or renew one with a refresh token
+        (one resource, two grants, like an OAuth token endpoint)."""
+        body = self.body(event)
         username = body.get("username") or body.get("email")
-        password = body.get("password")
-        secret_hash = self.calculate_secret_hash(username)
+        if not username:
+            return bad_request("username is required")
+        if body.get("refresh_token"):
+            flow = "REFRESH_TOKEN_AUTH"
+            params = {"REFRESH_TOKEN": body["refresh_token"]}
+        elif body.get("password"):
+            flow = "USER_PASSWORD_AUTH"
+            params = {"USERNAME": username, "PASSWORD": body["password"]}
+        else:
+            return bad_request("password or refresh_token is required")
+        params["SECRET_HASH"] = self.calculate_secret_hash(username)
 
         try:
             response = cognito_client.initiate_auth(
-                AuthFlow="USER_PASSWORD_AUTH",
-                AuthParameters={
-                    "USERNAME": username,
-                    "PASSWORD": password,
-                    "SECRET_HASH": secret_hash,
-                },
-                ClientId=self.client_id,
+                AuthFlow=flow, AuthParameters=params, ClientId=self.client_id
             )
-
+            tokens = response["AuthenticationResult"]
             user_info, groups = self.fetch_user_info(username)
-            return {
-                "statusCode": 200,
-                "body": json.dumps(
-                    {
-                        "user_info": user_info,
-                        "groups": groups,
-                        "id_token": response["AuthenticationResult"]["IdToken"],
-                        "access_token": response["AuthenticationResult"]["AccessToken"],
-                        "refresh_token": response["AuthenticationResult"][
-                            "RefreshToken"
-                        ],
-                    }
-                ),
-            }
         except ClientError as e:
-            log.error(f"Error: {e.response}")
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": e.response["Error"]["Message"]}),
-            }
+            log.error(f"{flow} failed: {e.response['Error']['Code']}")
+            # An unknown user is a failed login, not a 404 that tells a
+            # caller which usernames exist.
+            return error_response(e, {"UserNotFoundException": 401})
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps(
+                {
+                    "user_info": user_info,
+                    "groups": groups,
+                    "id_token": tokens["IdToken"],
+                    "access_token": tokens["AccessToken"],
+                    # A refresh returns no new refresh token; keep the old one.
+                    "refresh_token": tokens.get(
+                        "RefreshToken", body.get("refresh_token")
+                    ),
+                }
+            ),
+        }
 
     def delete_session(self, event):
         try:
@@ -323,10 +328,7 @@ class AuthorizationServices:
                 "body": json.dumps({"message": "Logout successful"}),
             }
         except ClientError as e:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": e.response["Error"]["Message"]}),
-            }
+            return error_response(e)
 
     def calculate_secret_hash(self, username):
         message = username + self.client_id
@@ -334,66 +336,6 @@ class AuthorizationServices:
             self.client_secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
         ).digest()
         return base64.b64encode(secret_hash).decode("utf-8")
-
-    def refresh_session(self, event):
-        body = json.loads(event["body"])
-
-        refresh_token = body.get("refresh_token")
-        if not refresh_token:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": "Refresh token is required"}),
-            }
-
-        username = event["requestContext"]["authorizer"].get("username")
-
-        try:
-            # Use the refresh token to get new tokens
-            secret_hash = self.calculate_secret_hash(
-                username
-            )  # Calculate the secret hash
-            response = cognito_client.initiate_auth(
-                AuthFlow="REFRESH_TOKEN_AUTH",
-                AuthParameters={
-                    "REFRESH_TOKEN": refresh_token,
-                    "SECRET_HASH": secret_hash,  # Include the secret hash
-                },
-                ClientId=self.client_id,
-            )
-
-            # Extract tokens from the response
-            access_token = response["AuthenticationResult"]["AccessToken"]
-            id_token = response["AuthenticationResult"]["IdToken"]
-            new_refresh_token = response["AuthenticationResult"].get(
-                "RefreshToken", refresh_token
-            )  # Use the new refresh token if provided
-
-            user_info, groups = self.fetch_user_info(username)
-
-            return {
-                "statusCode": 200,
-                "body": json.dumps(
-                    {
-                        "access_token": access_token,
-                        "id_token": id_token,
-                        "refresh_token": new_refresh_token,
-                        "user_info": user_info,
-                        "groups": groups,
-                    }
-                ),
-            }
-        except ClientError as e:
-            log.error(f"ClientError occurred: {e.response}")
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": e.response["Error"]["Message"]}),
-            }
-        except Exception as e:
-            log.error(f"Unexpected error occurred: {str(e)}")
-            return {
-                "statusCode": 500,
-                "body": json.dumps({"message": "An unexpected error occurred"}),
-            }
 
     def fetch_user_info(self, username):
         # Fetch user attributes
@@ -412,6 +354,20 @@ class AuthorizationServices:
 
         return attributes, groups
 
+    def require_admin(self, event) -> Optional[dict]:
+        """403 response unless the caller is in the admin group. Fails closed:
+        with no USER_ADMIN_GROUP configured nobody gets admin actions, since
+        otherwise any signed-in user could delete users or grant themselves
+        any group."""
+        if self.user_admin_group and self.user_admin_group in (
+            self.get_permissions_from_event(event)
+        ):
+            return None
+        return {
+            "statusCode": 403,
+            "body": json.dumps({"message": "Admin permission required"}),
+        }
+
     def get_permissions_from_event(self, event):
         """
         Extracts permissions from a decoded JWT token.
@@ -422,7 +378,12 @@ class AuthorizationServices:
 
         def to_list(x):
             if isinstance(x, str):
-                return re.split(r"[,\s]+", x.strip())
+                x = x.strip()
+                # Authorizer context values must be strings, so a token
+                # validator passes a list as JSON ('["admin"]').
+                if x.startswith("["):
+                    return to_list(json.loads(x))
+                return re.split(r"[,\s]+", x)
             elif isinstance(x, list):
                 return x
             else:

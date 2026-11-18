@@ -1,13 +1,100 @@
 openapi: 3.0.0
 info:
   title: Authorization Services API
-  description: API for basic authorization services including signup, login, logout, and token refresh.
-  version: 1.0.0
+  description: >
+    Users and sessions on a Cognito user pool, served by
+    cloud_foundry.services.authorization_api. Routes marked admin need a token
+    whose groups include USER_ADMIN_GROUP. Any route can also answer 429 when
+    Cognito throttles, and 500 when Cognito fails.
+  version: 2.0.0
 paths:
-  /signup:
+  /users:
     post:
-      summary: Signup a new user
+      summary: Sign up a new user
       security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '201':
+          $ref: '#/components/responses/Message'
+        '400':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: The username is taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}:
+    get:
+      summary: Get a user's attributes and groups (admin)
+      security:
+        - auth: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        '200':
+          description: The user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete a user (admin)
+      security:
+        - auth: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        '200':
+          $ref: '#/components/responses/Message'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /users/me/password:
+    put:
+      summary: Change the signed-in user's password
+      security:
+        - auth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [old_password, new_password]
+              properties:
+                old_password:
+                  type: string
+                new_password:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Message'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          description: Wrong old password, or the access token is no longer valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}/groups:
+    put:
+      summary: Set a user's groups (admin)
+      security:
+        - auth: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
       requestBody:
         required: true
         content:
@@ -15,207 +102,154 @@ paths:
             schema:
               type: object
               properties:
+                groups:
+                  type: array
+                  items:
+                    type: string
+                  example: ["user"]
+      responses:
+        '200':
+          $ref: '#/components/responses/Message'
+        '400':
+          description: A group in the list does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /sessions:
+    post:
+      summary: Log in, or renew a session with a refresh token
+      description: >
+        Send a password to log in, or a refresh_token to get new tokens
+        without the password. Either way the response is a new session.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
                 username:
-                  type: string
-                  example: johndoe
-                password:
-                  type: string
-                  example: Password123!
-                email:
                   type: string
                   example: johndoe@example.com
-                nickName:
+                email:
                   type: string
-                  example: Jon D
-      responses:
-        '200':
-          description: Signup successful
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: Signup successful
-        '400':
-          description: Signup failed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: An error occurred
-  /login:
-    post:
-      summary: Login a user
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                username:
-                  type: string
-                  example: johndoe
+                  description: Used when username is missing.
                 password:
                   type: string
                   example: Password123!
-      responses:
-        '200':
-          description: Login successful
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  id_token:
-                    type: string
-                    example: eyJraWQiOiJr...
-                  access_token:
-                    type: string
-                    example: eyJraWQiOiJr...
-                  refresh_token:
-                    type: string
-                    example: eyJraWQiOiJr...
-        '400':
-          description: Login failed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: An error occurred
-  /logout:
-    post:
-      summary: Logout a user
-      security:
-      - auth: []
-      responses:
-        '200':
-          description: Logout successful
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: Logout successful
-        '400':
-          description: Logout failed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: An error occurred
-  /refresh-token:
-    post:
-      summary: Refresh tokens
-      description: Refresh the access token and optionally the refresh token using the provided refresh token.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                username:
-                  type: string
-                  example: johndoe
                 refresh_token:
                   type: string
+                  description: Renews the session; used instead of password.
                   example: eyJraWQiOiJr...
       responses:
         '200':
-          description: Token refresh successful
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  access_token:
-                    type: string
-                    example: eyJraWQiOiJr...
-                  id_token:
-                    type: string
-                    example: eyJraWQiOiJr...
-                  refresh_token:
-                    type: string
-                    example: eyJraWQiOiJr...
-                  groups:
-                    type: array
-                    items:
-                      type: string
-                    example: ["admin", "user"]
+          $ref: '#/components/responses/Session'
         '400':
-          description: Token refresh failed
+          $ref: '#/components/responses/Error'
+        '401':
+          description: Wrong username or password, or an expired refresh token
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: An error occurred
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The user is not confirmed or must reset the password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /sessions/me:
+    delete:
+      summary: Log out (signs the access token out everywhere)
+      security:
+        - auth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Message'
+        '401':
+          $ref: '#/components/responses/Error'
 components:
+  parameters:
+    Username:
+      name: username
+      in: path
+      required: true
+      schema:
+        type: string
   schemas:
-    SignupRequest:
+    Credentials:
       type: object
+      required: [password]
       properties:
         username:
-          type: string
-          example: johndoe
-        password:
-          type: string
-          example: Password123!
-        email:
           type: string
           example: johndoe@example.com
-    LoginRequest:
-      type: object
-      properties:
-        username:
+        email:
           type: string
-          example: johndoe
+          description: Used when username is missing.
+          example: johndoe@example.com
         password:
           type: string
           example: Password123!
-    LogoutRequest:
+    User:
       type: object
       properties:
-        access_token:
-          type: string
-          example: eyJraWQiOiJr...
-    RefreshTokenRequest:
-      type: object
-      properties:
-        refresh_token:
-          type: string
-          example: eyJraWQiOiJr...
-    RefreshTokenResponse:
-      type: object
-      properties:
-        access_token:
-          type: string
-          example: eyJraWQiOiJr...
-        id_token:
-          type: string
-          example: eyJraWQiOiJr...
-        refresh_token:
-          type: string
-          example: eyJraWQiOiJr...
+        user_info:
+          type: object
+          additionalProperties:
+            type: string
         groups:
           type: array
           items:
             type: string
           example: ["admin", "user"]
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+          example: An error occurred
+  responses:
+    Message:
+      description: Success
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+    Error:
+      description: Request failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: No such user
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Session:
+      description: Tokens and the user's attributes and groups
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/User'
+              - type: object
+                properties:
+                  id_token:
+                    type: string
+                  access_token:
+                    type: string
+                  refresh_token:
+                    type: string
