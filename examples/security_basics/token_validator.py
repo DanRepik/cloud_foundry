@@ -26,7 +26,6 @@ def handler(event, context):
     try:
         token = parse_token_from_event(check_event_for_error(event))
         decoded_token = decode_token(event, token)
-        log.info(f"Decoded token: {decoded_token}")
         return get_policy(
             build_policy_resource_base(event),
             decoded_token,
@@ -165,7 +164,6 @@ def get_policy(policy_resource_base: str, decoded: dict, is_ws: bool) -> dict:
         ),
         "username": decoded.get("username"),
     }
-    log.info(f"context: {json.dumps(context)}")
 
     if policy_resource_base == DEFAULT_ARN:
         resources = [DEFAULT_ARN]

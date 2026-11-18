@@ -1,5 +1,6 @@
-"""The example token validator must never write the bearer token to logs:
-anyone who can read CloudWatch could replay it until it expires."""
+"""The example token validator must never write the bearer token to logs
+(anyone who can read CloudWatch could replay it until it expires), nor the
+claims decoded from it (email, username, groups)."""
 
 import importlib.util
 import logging
@@ -8,6 +9,12 @@ from pathlib import Path
 import pytest
 
 TOKEN = "eyJhbGciOiJSUzI1NiJ9.secret-payload.secret-signature"
+CLAIMS = {
+    "sub": "user-1",
+    "email": "alice@example.com",
+    "username": "alice-login",
+    "cognito:groups": ["payroll-admins"],
+}
 
 
 @pytest.fixture
@@ -33,12 +40,14 @@ def validator():
         },
     ],
 )
-def test_handler_does_not_log_the_token(validator, monkeypatch, caplog, event):
-    monkeypatch.setattr(validator, "decode_token", lambda e, t: {"sub": "user-1"})
+def test_handler_logs_neither_token_nor_claims(validator, monkeypatch, caplog, event):
+    monkeypatch.setattr(validator, "decode_token", lambda e, t: CLAIMS)
     caplog.set_level(logging.DEBUG)
 
     result = validator.handler(event, None)
 
     assert result["principalId"] == "user-1"
     assert caplog.records, "expected the handler to log something"
-    assert not [r for r in caplog.records if TOKEN in r.getMessage()]
+    secrets = [TOKEN, "alice@example.com", "alice-login", "payroll-admins"]
+    leaked = [s for r in caplog.records for s in secrets if s in r.getMessage()]
+    assert not leaked
