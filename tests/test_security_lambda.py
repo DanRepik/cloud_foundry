@@ -43,6 +43,16 @@ def test_get_access_token_extracts_bearer_token(auth_services):
     assert auth_services.get_access_token(event) == "abc123"
 
 
+@pytest.mark.parametrize("name", ["authorization", "AUTHORIZATION"])
+def test_get_access_token_ignores_header_case(auth_services, name):
+    event = {"headers": {name: "Bearer abc123"}}
+    assert auth_services.get_access_token(event) == "abc123"
+
+
+def test_get_access_token_with_null_headers(auth_services):
+    assert auth_services.get_access_token({"headers": None}) is None
+
+
 def test_get_access_token_extracts_raw_token(auth_services):
     event = {"headers": {"Authorization": "abc123"}}
     assert auth_services.get_access_token(event) == "abc123"
@@ -204,7 +214,11 @@ class FakeAuthClient:
         return {"AuthenticationResult": {"IdToken": "id", "AccessToken": "access"}}
 
     def admin_get_user(self, **kwargs):
-        return {"UserAttributes": [{"Name": "email", "Value": "a@b.c"}]}
+        # An email-sign-in pool: the Cognito username is the sub.
+        return {
+            "Username": "sub-1",
+            "UserAttributes": [{"Name": "email", "Value": "a@b.c"}],
+        }
 
     def admin_list_groups_for_user(self, **kwargs):
         return {"Groups": [{"GroupName": "user"}]}
@@ -225,6 +239,10 @@ def test_refresh_token_renews_session_on_post_sessions(auth_services, monkeypatc
     assert result["statusCode"] == 200
     assert client.calls[0]["AuthFlow"] == "REFRESH_TOKEN_AUTH"
     assert client.calls[0]["AuthParameters"]["REFRESH_TOKEN"] == "r1"
+    # Hashed with the Cognito username, not the email the caller sent.
+    assert client.calls[0]["AuthParameters"][
+        "SECRET_HASH"
+    ] == auth_services.calculate_secret_hash("sub-1")
     # Cognito returns no new refresh token on refresh; the old one stays valid.
     assert json.loads(result["body"])["refresh_token"] == "r1"
 
@@ -269,3 +287,39 @@ def test_signup_with_taken_username_is_409(auth_services, monkeypatch):
         "body": json.dumps({"username": "a@b.c", "password": "pw"}),
     }
     assert auth_services.handler(event, None)["statusCode"] == 409
+
+
+def test_password_login_hashes_the_name_given(auth_services, monkeypatch):
+    client = FakeAuthClient()
+    monkeypatch.setattr(security_lambda_module, "cognito_client", client)
+
+    auth_services.handler(_session_event({"email": "a@b.c", "password": "pw"}), None)
+
+    assert client.calls[0]["AuthParameters"][
+        "SECRET_HASH"
+    ] == auth_services.calculate_secret_hash("a@b.c")
+
+
+def test_client_secret_read_once_from_secrets_manager(monkeypatch):
+    reads = []
+
+    class FakeSecrets:
+        def get_secret_value(self, SecretId):
+            reads.append(SecretId)
+            return {"SecretString": "from-sm"}
+
+    monkeypatch.setenv("CLIENT_SECRET_ARN", "arn:secret")
+    monkeypatch.delenv("CLIENT_SECRET", raising=False)
+    services = AuthorizationServices(user_pool_id="pool-123", client_id="client-123")
+    monkeypatch.setattr(
+        security_lambda_module.boto3,
+        "client",
+        lambda name, **kw: FakeSecrets() if name == "secretsmanager" else None,
+    )
+    monkeypatch.setattr(security_lambda_module, "cognito_client", FakeAuthClient())
+
+    for _ in range(2):
+        services.handler(_session_event({"email": "a@b.c", "password": "pw"}), None)
+
+    assert services.client_secret == "from-sm"
+    assert reads == ["arn:secret"]
