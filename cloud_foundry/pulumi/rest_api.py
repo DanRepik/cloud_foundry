@@ -29,6 +29,7 @@ class RestAPI(pulumi.ComponentResource):
     rest_api: Optional[aws.apigateway.RestApi] = None
     rest_api_id: pulumi.Output[str] = None  # The REST API identifier
     domain: Optional[str] = None  # The custom domain name for the API
+    _gateway_role: Optional[aws.iam.Role] = None  # built once, see _get_gateway_role
 
     def __init__(
         self,
@@ -371,7 +372,6 @@ class RestAPI(pulumi.ComponentResource):
                             "resourcePath": "$context.resourcePath",
                             "status": "$context.status",
                             "origin": "$context.request.header.Origin",
-                            "authorization": "$context.request.header.Authorization",
                             "protocol": "$context.protocol",
                             "responseLength": "$context.responseLength",
                         }
@@ -548,6 +548,11 @@ class RestAPI(pulumi.ComponentResource):
         if not self.content:
             return None
 
+        # Called from _collect_arns and _create_cognito_permissions; the
+        # second call must not declare the same named resources again.
+        if self._gateway_role is not None:
+            return self._gateway_role
+
         content_with_bucket = [item for item in self.content if "bucket_name" in item]
         prefixes = [item.get("prefix") for item in content_with_bucket]
 
@@ -618,6 +623,7 @@ class RestAPI(pulumi.ComponentResource):
         )
         log.info("S3 access policy attached successfully: %s", api_gateway_role)
 
+        self._gateway_role = api_gateway_role
         return api_gateway_role
 
     def get_endpoint(self):

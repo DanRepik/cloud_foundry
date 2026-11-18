@@ -61,3 +61,21 @@ def test_reaper_names_as_str_or_output(mocks, wrap):
     assert len(targets) == 2
     for target in targets:
         assert target.inputs["arn"].endswith(":function:cep-dev-idle-esm-reaper")
+
+
+def test_request_mapping_enable_raises_on_failed_entry(monkeypatch):
+    from cloud_foundry.utils import idle_reaper_client
+
+    class FakeEvents:
+        def put_events(self, Entries):
+            return {
+                "FailedEntryCount": 1,
+                "Entries": [{"ErrorCode": "ThrottlingException"}],
+            }
+
+    monkeypatch.setattr(
+        idle_reaper_client.boto3, "client", lambda *a, **k: FakeEvents()
+    )
+
+    with pytest.raises(RuntimeError, match="ThrottlingException"):
+        idle_reaper_client.request_mapping_enable("https://sqs/q")

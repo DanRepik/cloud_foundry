@@ -15,28 +15,33 @@ print(f"ACCOUNT_ID: {ACCOUNT_ID}")
 # Define the security function
 security_function = python_function(
     "security-function",
+    # The auth service that ships with cloud_foundry; boto3 is all it needs.
     sources={
-        "app.py": "security_lambda.py",
+        "app.py": "pkg://cloud_foundry.services.authorization_api/security_lambda.py",
     },
     environment={
         "CLIENT_ID": os.getenv("CLIENT_ID"),
         "USER_POOL_ID": os.getenv("USER_POOL_ID"),
         "CLIENT_SECRET": os.getenv("CLIENT_SECRET"),
-        "ISSUER": f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}",
+        # Admin routes (get/delete users, change groups) refuse everyone
+        # until this names a Cognito group.
+        "USER_ADMIN_GROUP": os.getenv("USER_ADMIN_GROUP"),
+        "USER_DEFAULT_GROUP": os.getenv("USER_DEFAULT_GROUP"),
     },
-    requirements=["pyjwt", "requests", "cryptography"],
     policy_statements=[
         {
             "Effect": "Allow",
             "Actions": [
-                "cognito-idp:SignUp",
                 "cognito-idp:InitiateAuth",
                 "cognito-idp:GlobalSignOut",
+                "cognito-idp:ChangePassword",
                 "cognito-idp:AdminCreateUser",
-                "cognito-idp:AdminGetUser",
                 "cognito-idp:AdminSetUserPassword",
+                "cognito-idp:AdminGetUser",
+                "cognito-idp:AdminDeleteUser",
                 "cognito-idp:AdminListGroupsForUser",
-                "cognito-idp:GetJWKS",
+                "cognito-idp:AdminAddUserToGroup",
+                "cognito-idp:AdminRemoveUserFromGroup",
             ],
             "Resources": [
                 f"arn:aws:cognito-idp:{REGION}:{ACCOUNT_ID}:userpool/{USER_POOL_ID}"
@@ -66,11 +71,16 @@ rest_api(
         {"type": "token_validator", "name": "auth", "function": token_validator}
     ],
     integrations=[
-        {"path": "/signup", "method": "post", "function": security_function},
-        {"path": "/login", "method": "post", "function": security_function},
-        {"path": "/logout", "method": "post", "function": security_function},
-        {"path": "/commitments", "method": "post", "function": security_function},
-        {"path": "/refresh-token", "method": "post", "function": security_function},
+        {"path": path, "method": method, "function": security_function}
+        for path, method in [
+            ("/users", "post"),
+            ("/users/{username}", "get"),
+            ("/users/{username}", "delete"),
+            ("/users/me/password", "put"),
+            ("/users/{username}/groups", "put"),
+            ("/sessions", "post"),
+            ("/sessions/me", "delete"),
+        ]
     ],
     export_api="s3://repik-apis/security-api.yaml",
 )

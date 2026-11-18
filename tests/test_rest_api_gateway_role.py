@@ -106,3 +106,16 @@ def test_gateway_role_grants_whole_bucket_without_prefix(gateway_role_api):
 
     assert "arn:aws:s3:::my-bucket" in resources
     assert "arn:aws:s3:::my-bucket/*" in resources
+
+
+@pytest.mark.unit
+def test_gateway_role_is_created_once(gateway_role_api):
+    # _collect_arns and _create_cognito_permissions both ask for the role;
+    # declaring it twice is a duplicate-URN failure at deploy.
+    api, mocks = gateway_role_api
+    api.name = "test-api"
+    api.content = [{"bucket_name": "my-bucket"}]
+
+    assert api._get_gateway_role() is api._get_gateway_role()
+    _drain_pulumi_event_loop()
+    assert [r.typ for r in mocks.created].count("aws:iam/role:Role") == 1
